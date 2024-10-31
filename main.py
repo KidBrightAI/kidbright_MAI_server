@@ -168,6 +168,7 @@ def convert_model(project_id, q):
     #load project
     project_model = project["trainConfig"]["modelType"]
     model_label = [l["label"] for l in project["labels"]]
+    model_label.sort()
     num_classes = len(model_label)
     if project_model == "slim_yolo_v2":
         input_size = [416 , 416]        
@@ -185,6 +186,7 @@ def convert_model(project_id, q):
     elif project_model.startswith("mobilenet"):
         input_size = [224, 224]
         model_label = [ l["label"] for l in project["labels"]]
+        model_label.sort()
         from torchvision.models import mobilenet_v2
         net = mobilenet_v2(pretrained=False)
         net.classifier[1] = nn.Linear(net.classifier[1].in_features, num_classes)        
@@ -194,6 +196,7 @@ def convert_model(project_id, q):
     elif project_model == "resnet18":
         input_size = [224, 224]
         model_label = [ l["label"] for l in project["labels"]]
+        model_label.sort()
         from torchvision import models
         net = models.resnet18(pretrained=False)
         net.fc = nn.Linear(net.fc.in_features , num_classes)
@@ -280,6 +283,7 @@ def training_task(project_id, q):
         # 3 ========== training ========= #
         # label format in json lables : [ {label: "label1"}, {label: "label2"}]
         model_label = [l["label"] for l in project["labels"]]
+        model_label.sort()
 
         if project["trainConfig"]["modelType"] == "slim_yolo_v2":
             res = train_object_detection(project, output_path, project_folder,q,
