@@ -285,8 +285,27 @@ def training_task(project_id, q):
         # label format in json lables : [ {label: "label1"}, {label: "label2"}]
         model_label = [l["label"] for l in project["labels"]]
         model_label.sort()
-
-        if project["trainConfig"]["modelType"] == "slim_yolo_v2":
+        if project["projectType"] == "VOICE_CLASSIFICATION":
+            modelType = "code" if "code" in project["trainConfig"] else project["trainConfig"]["modelType"]
+            res = train_voice_classification(project, output_path, project_folder,q,
+                cuda= True if torch.cuda.is_available() else False, 
+                learning_rate=project["trainConfig"]["learning_rate"],  
+                batch_size=project["trainConfig"]["batch_size"],
+                start_epoch=0, 
+                epoch=project["trainConfig"]["epochs"],
+                train_split=project["trainConfig"]["train_split"], 
+                model_type=modelType, 
+                model_weight=None,
+                validate_matrix='val_acc',
+                save_method=project["trainConfig"]["saveMethod"],
+                step_lr=(150, 200),
+                labels=model_label,
+                weight_decay=5e-4,
+                warm_up_epoch=6
+            )
+            if res:
+                STAGE = 3
+        elif project["trainConfig"]["modelType"] == "slim_yolo_v2":
             res = train_object_detection(project, output_path, project_folder,q,
                 high_resolution=True, 
                 multi_scale=True, 
@@ -308,25 +327,7 @@ def training_task(project_id, q):
             )
             if res:
                 STAGE = 3
-        elif project["projectType"] == "VOICE_CLASSIFICATION":
-            res = train_voice_classification(project, output_path, project_folder,q,
-                cuda= True if torch.cuda.is_available() else False, 
-                learning_rate=project["trainConfig"]["learning_rate"],  
-                batch_size=project["trainConfig"]["batch_size"],
-                start_epoch=0, 
-                epoch=project["trainConfig"]["epochs"],
-                train_split=project["trainConfig"]["train_split"], 
-                model_type=project["trainConfig"]["modelType"], 
-                model_weight=None,
-                validate_matrix='val_acc',
-                save_method=project["trainConfig"]["saveMethod"],
-                step_lr=(150, 200),
-                labels=model_label,
-                weight_decay=5e-4,
-                warm_up_epoch=6
-            )
-            if res:
-                STAGE = 3
+        
         #check if start with resnet18
         elif project["trainConfig"]["modelType"].startswith("resnet"):
             res = train_image_classification(project, output_path, project_folder,q,

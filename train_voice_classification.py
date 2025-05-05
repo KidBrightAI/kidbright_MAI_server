@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torchvision import models, datasets, transforms
+from models.voice_cnn import VoiceCnn
 # import resnet as models
 import numpy as np
 import cv2
@@ -11,6 +12,7 @@ from torchsummary import summary
 import torch.optim as optim
 import time
 import torch.backends.cudnn as cudnn
+
 
 
 def train_voice_classification(project, path_to_save, project_dir,q,
@@ -111,19 +113,8 @@ def train_voice_classification(project, path_to_save, project_dir,q,
     print("----------------------------------------------------------")
     print('Building the model...')
     q.announce({"time":time.time(), "event": "model_building", "msg" : "Building the model..."})
-
     print('model type:', model_type)
-    if model_type == 'mobilenet-100':
-        net = models.mobilenet_v2(pretrained=True, width_mult=1.0)
-    elif model_type == 'mobilenet-75':
-        net = models.mobilenet_v2(pretrained=True, width_mult=0.75)
-    elif model_type == 'mobilenet-50':
-        net = models.mobilenet_v2(pretrained=True, width_mult=0.5)
-    elif model_type == 'mobilenet-25':
-        net = models.mobilenet_v2(pretrained=True, width_mult=0.25)
-    elif model_type == 'mobilenet-10':
-        net = models.mobilenet_v2(pretrained=True, width_mult=0.1)
-    elif model_type == 'resnet18':
+    if model_type == 'resnet18':
         net = models.resnet18(pretrained=True)
     elif model_type == 'resnet34':
         net = models.resnet34(pretrained=True)
@@ -133,6 +124,8 @@ def train_voice_classification(project, path_to_save, project_dir,q,
         net = models.resnet101(pretrained=True)
     elif model_type == 'resnet152':
         net = models.resnet152(pretrained=True)        
+    elif model_type == 'code':
+        net = VoiceCnn(device, project["trainConfig"]["code"], input_size=input_shape, num_classes=num_classes, trainable=True)
     else:
         print('model type error')
         return False
@@ -142,6 +135,8 @@ def train_voice_classification(project, path_to_save, project_dir,q,
         net.classifier[1] = nn.Linear(in_features=model.classifier[1].in_features, out_features=num_classes, bias=True)
     elif model_type.startswith('resnet'):
         net.fc = nn.Linear(in_features=net.fc.in_features, out_features=num_classes, bias=True)
+    elif model_type == 'code':
+        pass
     else:
         print('model type error')
         return False
