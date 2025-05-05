@@ -30,7 +30,7 @@ def train_voice_classification(project, path_to_save, project_dir,q,
         labels=None,
         weight_decay=5e-4,
         warm_up_epoch=6,
-        input_shape = (3, 224, 224)
+        input_shape = (3, 147, 13)
     ):
     
     os.makedirs(path_to_save, exist_ok=True)
@@ -87,7 +87,9 @@ def train_voice_classification(project, path_to_save, project_dir,q,
             os.rmdir(os.path.join(data_dir, label))
             
     train_transforms = transforms.Compose([
-        transforms.Resize(224),
+        #transforms.Grayscale(num_output_channels=3),
+        #transforms.Resize(input_shape[1:]),
+        #transforms.Resize(input_shape),
         #transforms.Resize(255),
         #transforms.RandomRotation(30),
         #transforms.RandomResizedCrop(224),
@@ -96,7 +98,9 @@ def train_voice_classification(project, path_to_save, project_dir,q,
         transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
     ])
     test_transforms = transforms.Compose([
-        transforms.Resize(224),
+        #transforms.Grayscale(num_output_channels=3),
+        #transforms.Resize(input_shape[1:]),
+        #transforms.Resize(input_shape),
         #transforms.Resize(255),
         #transforms.CenterCrop(224),
         transforms.ToTensor(),
@@ -183,6 +187,7 @@ def train_voice_classification(project, path_to_save, project_dir,q,
         net.train()
         for i, data in enumerate(trainloader, 0):
             inputs, labels = data
+            print('inputs.shape:', inputs.shape)
             inputs = inputs.to(device)
             labels = labels.to(device)
 

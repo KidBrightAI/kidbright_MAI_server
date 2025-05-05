@@ -152,11 +152,12 @@ def convert_model(project_id, q):
     project = helper.read_json_file(os.path.join(project_path, PROJECT_FILENAME))
     
     best_file = None
-    
-    if project["trainConfig"]["modelType"].startswith("mobilenet") or project["trainConfig"]["modelType"] == "resnet18":
+    modelType = "code" if "code" in project["trainConfig"] else project["trainConfig"]["modelType"]
+
+    if modelType.startswith("mobilenet") or modelType == "resnet18" or modelType == "code":
         best_file = os.path.join(project_path, "output", "best_acc.pth")
 
-    elif project["trainConfig"]["modelType"] == "slim_yolo_v2":
+    elif modelType == "slim_yolo_v2":
         best_file = os.path.join(project_path, "output", "best_map.pth")
 
     if best_file == None or not os.path.exists(best_file):
@@ -167,14 +168,13 @@ def convert_model(project_id, q):
     q.announce({"time":time.time(), "event": "convert_model_init", "msg" : "Start converting model"})
 
     #load project
-    project_model = project["trainConfig"]["modelType"]
     model_label = [l["label"] for l in project["labels"]]
     model_label.sort()
     num_classes = len(model_label)
-    if project_model == "slim_yolo_v2":
+    if modelType == "slim_yolo_v2":
         input_size = [416 , 416]        
         print("label:", model_label)
-        if project_model == "slim_yolo_v2":
+        if modelType == "slim_yolo_v2":
             from models.slim_yolo_v2 import SlimYOLOv2
             anchor_size = ANCHOR_SIZE            
             detect_threshold = float(project["trainConfig"]["objectThreshold"])
@@ -184,7 +184,7 @@ def convert_model(project_id, q):
         net.load_state_dict(torch.load(best_file, map_location=device))
         net.to(device).eval()
 
-    elif project_model.startswith("mobilenet"):
+    elif modelType.startswith("mobilenet"):
         input_size = [224, 224]
         model_label = [ l["label"] for l in project["labels"]]
         model_label.sort()
@@ -194,7 +194,7 @@ def convert_model(project_id, q):
         net.load_state_dict(torch.load(best_file, map_location=device))
         net.to(device).eval()
 
-    elif project_model == "resnet18":
+    elif modelType == "resnet18":
         input_size = [224, 224]
         model_label = [ l["label"] for l in project["labels"]]
         model_label.sort()
@@ -203,6 +203,15 @@ def convert_model(project_id, q):
         net.fc = nn.Linear(net.fc.in_features , num_classes)
         net.load_state_dict(torch.load(best_file, map_location=device))
         net.to(device).eval()
+    elif modelType == "code" and project["projectType"] == "VOICE_CLASSIFICATION":
+        input_size = [147, 13]
+        model_label = [ l["label"] for l in project["labels"]]
+        model_label.sort()
+        from models.voice_cnn import VoiceCnn
+        net = VoiceCnn(device, project["trainConfig"]["code"], input_size=input_size, num_classes=num_classes, trainable=False)
+        net.load_state_dict(torch.load(best_file, map_location=device))
+        net.to(device).eval()
+        
 
     print('Finished loading model!')
 
@@ -236,7 +245,7 @@ def convert_model(project_id, q):
     os.system(cmd)
 
     output_model_calibrate_table = os.path.join(project_path, "output", "model_opt.table")
-    images_path = os.path.join(project_path, "dataset", "JPEGImages") if project_model == "slim_yolo_v2" else os.path.join("data","test_images")
+    images_path = os.path.join(project_path, "dataset", "JPEGImages") if modelType == "slim_yolo_v2" else os.path.join("data","test_images")
     q.announce({"time":time.time(), "event": "initial", "msg" : "Start calibrating model"})
     cmd2 = "tools/spnntools calibrate -p=\""+output_model_optimize_param_path+"\" -b=\""+output_model_optimize_bin_path+"\" -i=\""+images_path+"\" -o=\""+output_model_calibrate_table+"\" --m=\"127.5,127.5,127.5\" --n=\"0.0078125, 0.0078125, 0.0078125\" --size=\"224,224\" -c -t=4"
     os.system(cmd2)
@@ -285,8 +294,8 @@ def training_task(project_id, q):
         # label format in json lables : [ {label: "label1"}, {label: "label2"}]
         model_label = [l["label"] for l in project["labels"]]
         model_label.sort()
+        modelType = "code" if "code" in project["trainConfig"] else modelType
         if project["projectType"] == "VOICE_CLASSIFICATION":
-            modelType = "code" if "code" in project["trainConfig"] else project["trainConfig"]["modelType"]
             res = train_voice_classification(project, output_path, project_folder,q,
                 cuda= True if torch.cuda.is_available() else False, 
                 learning_rate=project["trainConfig"]["learning_rate"],  
@@ -305,7 +314,7 @@ def training_task(project_id, q):
             )
             if res:
                 STAGE = 3
-        elif project["trainConfig"]["modelType"] == "slim_yolo_v2":
+        elif modelType == "slim_yolo_v2":
             res = train_object_detection(project, output_path, project_folder,q,
                 high_resolution=True, 
                 multi_scale=True, 
@@ -315,7 +324,7 @@ def training_task(project_id, q):
                 start_epoch=0, 
                 epoch=project["trainConfig"]["epochs"],
                 train_split=project["trainConfig"]["train_split"],
-                model_type=project["trainConfig"]["modelType"],
+                model_type=modelType,
                 model_weight=None,
                 validate_matrix=project["trainConfig"]["validateMatrix"],
                 save_method=project["trainConfig"]["saveMethod"],
@@ -329,7 +338,7 @@ def training_task(project_id, q):
                 STAGE = 3
         
         #check if start with resnet18
-        elif project["trainConfig"]["modelType"].startswith("resnet"):
+        elif modelType.startswith("resnet"):
             res = train_image_classification(project, output_path, project_folder,q,
                 cuda= True if torch.cuda.is_available() else False, 
                 learning_rate=project["trainConfig"]["learning_rate"],  
@@ -337,7 +346,7 @@ def training_task(project_id, q):
                 start_epoch=0, 
                 epoch=project["trainConfig"]["epochs"],
                 train_split=project["trainConfig"]["train_split"], 
-                model_type=project["trainConfig"]["modelType"], 
+                model_type=modelType, 
                 model_weight=None,
                 validate_matrix='val_acc',
                 save_method=project["trainConfig"]["saveMethod"],
@@ -350,7 +359,7 @@ def training_task(project_id, q):
                 STAGE = 3
 
         #check if start with mobile net
-        elif project["trainConfig"]["modelType"].startswith("mobilenet"):
+        elif modelType.startswith("mobilenet"):
             res = train_image_classification(project, output_path, project_folder,q,
                 cuda= True if torch.cuda.is_available() else False, 
                 learning_rate=project["trainConfig"]["learning_rate"],  
@@ -358,7 +367,7 @@ def training_task(project_id, q):
                 start_epoch=0, 
                 epoch=project["trainConfig"]["epochs"],
                 train_split=project["trainConfig"]["train_split"], 
-                model_type=project["trainConfig"]["modelType"], 
+                model_type=modelType, 
                 model_weight=None,
                 validate_matrix='val_acc',
                 save_method=project["trainConfig"]["saveMethod"],

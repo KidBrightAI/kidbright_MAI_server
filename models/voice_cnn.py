@@ -12,17 +12,19 @@ class VoiceCnn(nn.Module):
         code = ",\n".join(code.split("\n"))
         self.device = device
         self.input_size = input_size #147x13 pixels
+        print("input_size: ", input_size)
         self.num_classes = num_classes
         self.trainable = trainable
         fc = "torch.nn.LazyLinear(out_features = " + str(num_classes) + ", bias=True)"
         code = code + fc
+        print("code: ", code)
         self.pred = eval("nn.Sequential("+ code + ")")
         print("self.pred: ", self.pred)
-        #self.pred = eval(code)
-        #eval("        self.pred = nn.Sequential(" + code + ")")
+
     def forward(self, x, target=None):
         # x: [B, 1, H, W]
         B, C, H, W = x.shape
+        print("x.shape: ", x.shape)
         # pred: [B, 512]
         pred = self.pred(x)
         return pred
