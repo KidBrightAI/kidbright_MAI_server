@@ -211,7 +211,7 @@ def convert_model(project_id, q):
         net = VoiceCnn(device, project["trainConfig"]["code"], input_size=input_size, num_classes=num_classes, trainable=False)
         net.load_state_dict(torch.load(best_file, map_location=device))
         net.to(device).eval()
-        
+
 
     print('Finished loading model!')
 
@@ -247,7 +247,7 @@ def convert_model(project_id, q):
     output_model_calibrate_table = os.path.join(project_path, "output", "model_opt.table")
     images_path = os.path.join(project_path, "dataset", "JPEGImages") if modelType == "slim_yolo_v2" else os.path.join("data","test_images")
     q.announce({"time":time.time(), "event": "initial", "msg" : "Start calibrating model"})
-    cmd2 = "tools/spnntools calibrate -p=\""+output_model_optimize_param_path+"\" -b=\""+output_model_optimize_bin_path+"\" -i=\""+images_path+"\" -o=\""+output_model_calibrate_table+"\" --m=\"127.5,127.5,127.5\" --n=\"0.0078125, 0.0078125, 0.0078125\" --size=\"224,224\" -c -t=4"
+    cmd2 = "tools/spnntools calibrate -p=\""+output_model_optimize_param_path+"\" -b=\""+output_model_optimize_bin_path+"\" -i=\""+images_path+"\" -o=\""+output_model_calibrate_table+"\" --m=\"127.5,127.5,127.5\" --n=\"0.0078125, 0.0078125, 0.0078125\" --size=\""+str(input_size[0])+","+str(+input_size[1])+"\" -c -t=4"
     os.system(cmd2)
 
     output_model_quantize_bin_path = os.path.join(project_path, "output", "model_int8.bin")
@@ -294,7 +294,7 @@ def training_task(project_id, q):
         # label format in json lables : [ {label: "label1"}, {label: "label2"}]
         model_label = [l["label"] for l in project["labels"]]
         model_label.sort()
-        modelType = "code" if "code" in project["trainConfig"] else modelType
+        modelType = "code" if "code" in project["trainConfig"] else project["trainConfig"]["modelType"]
         if project["projectType"] == "VOICE_CLASSIFICATION":
             res = train_voice_classification(project, output_path, project_folder,q,
                 cuda= True if torch.cuda.is_available() else False, 
