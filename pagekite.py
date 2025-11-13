@@ -33,7 +33,13 @@ else:
   import warnings
   with warnings.catch_warnings():
     warnings.filterwarnings("ignore",category=DeprecationWarning)
-    from imp import new_module
+    if sys.version_info >= (3, 4):
+      from types import ModuleType as new_module
+    else:
+      import warnings
+      with warnings.catch_warnings():
+          warnings.filterwarnings("ignore", category=DeprecationWarning)
+          from imp import new_module
 __BREEDER = {}
 __builtin_open = open
 __os_path_exists, __os_path_getsize = os.path.exists, os.path.getsize
