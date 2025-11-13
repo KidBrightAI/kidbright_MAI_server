@@ -15,8 +15,6 @@ import sys, json, os, time, logging, random, shutil, tempfile, subprocess, re, p
 import base64
 import numpy as np
 import cv2
-import site
-sys.path.extend(site.getsitepackages())
 #---- helper ----#
 from utils.message_announcer import MessageAnnouncer
 import utils.helper as helper
