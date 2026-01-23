@@ -14,6 +14,9 @@ from pathlib import Path
 import sys, json, os, time, logging, random, shutil, tempfile, subprocess, re, platform, io
 import base64
 import numpy as np
+np.bool = np.bool_
+np.int = np.int_
+np.float = np.float32
 import cv2
 #---- helper ----#
 from utils.message_announcer import MessageAnnouncer
