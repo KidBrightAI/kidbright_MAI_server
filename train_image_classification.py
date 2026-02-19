@@ -137,7 +137,7 @@ def train_image_classification(project, path_to_save, project_dir,q,
 
     # add fc layer
     if model_type.startswith('mobilenet'):
-        net.classifier[1] = nn.Linear(in_features=model.classifier[1].in_features, out_features=num_classes, bias=True)
+        net.classifier[1] = nn.Linear(in_features=net.classifier[1].in_features, out_features=num_classes, bias=True)
     elif model_type.startswith('resnet'):
         net.fc = nn.Linear(in_features=net.fc.in_features, out_features=num_classes, bias=True)
     else:
