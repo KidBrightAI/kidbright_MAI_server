@@ -206,6 +206,7 @@ def convert_model(project_id, q):
         net.fc = nn.Linear(net.fc.in_features , num_classes)
         net.load_state_dict(torch.load(best_file, map_location=device))
         net.to(device).eval()
+
     elif modelType == "code" and project["projectType"] == "VOICE_CLASSIFICATION":
         input_size = [147, 13]
         model_label = [ l["label"] for l in project["labels"]]
@@ -236,29 +237,71 @@ def convert_model(project_id, q):
     with torch.no_grad():
         q.announce({"time":time.time(), "event": "initial", "msg" : "Start converting model to onnx"})
         torch_to_onnx(net.to("cpu"), input_shape, onnx_out, device="cpu")
-        q.announce({"time":time.time(), "event": "initial", "msg" : "Start converting onnx to ncnn"})
-        onnx_to_ncnn(input_shape, onnx=onnx_out, ncnn_param=ncnn_out_param, ncnn_bin=ncnn_out_bin)
-        print("convert end, ctrl-c to exit")
     net.no_post_process = False
 
-    output_model_optimize_bin_path = os.path.join(project_path, "output", "model_opt.bin")
-    output_model_optimize_param_path = os.path.join(project_path, "output", "model_opt.param")
-    q.announce({"time":time.time(), "event": "initial", "msg" : "Start optimizing model"})
-    cmd = f"tools/spnntools optimize {ncnn_out_param} {ncnn_out_bin} {output_model_optimize_param_path} {output_model_optimize_bin_path}"
-    os.system(cmd)
-
-    output_model_calibrate_table = os.path.join(project_path, "output", "model_opt.table")
+    board_id = project.get("currentBoard", {}).get("id", "")
     images_path = os.path.join(project_path, "dataset", "JPEGImages") if modelType == "slim_yolo_v2" else os.path.join("data","test_images")
-    q.announce({"time":time.time(), "event": "initial", "msg" : "Start calibrating model"})
-    cmd2 = "tools/spnntools calibrate -p=\""+output_model_optimize_param_path+"\" -b=\""+output_model_optimize_bin_path+"\" -i=\""+images_path+"\" -o=\""+output_model_calibrate_table+"\" --m=\"127.5,127.5,127.5\" --n=\"0.0078125, 0.0078125, 0.0078125\" --size=\""+str(input_size[0])+","+str(+input_size[1])+"\" -c -t=4"
-    os.system(cmd2)
 
-    output_model_quantize_bin_path = os.path.join(project_path, "output", "model_int8.bin")
-    output_model_quantize_param_path = os.path.join(project_path, "output", "model_int8.param")
-    q.announce({"time":time.time(), "event": "initial", "msg" : "Start quantizing model"})
-    cmd3 = "tools/spnntools quantize "+output_model_optimize_param_path+" "+output_model_optimize_bin_path+" "+output_model_quantize_param_path+" "+output_model_quantize_bin_path+" "+output_model_calibrate_table
-    os.system(cmd3)
-    
+    if board_id == "kidbright-mai-plus" and modelType.startswith("mobilenet"):
+        q.announce({"time":time.time(), "event": "initial", "msg" : "Start converting onnx to cvimodel"})
+        mlir_out = os.path.join(project_path, "output", "mobilenet.mlir")
+        npz_out = os.path.join(project_path, "output", "mobilenet_top_outputs.npz")
+        cali_table_out = os.path.join(project_path, "output", "mobilenet_cali_table")
+        cvimodel_out = os.path.join(project_path, "output", "model.cvimodel")
+        
+        test_img = os.path.join("data", "test_images2", "cat.jpg")
+
+        cmd1 = f"conda run -n kbmai model_transform.py --model_name mobilenet --model_def {onnx_out} --input_shapes [[1,3,224,224]] --mean 123.675,116.28,103.53 --scale 0.0171,0.0175,0.0174 --keep_aspect_ratio --pixel_format rgb --channel_format nchw --test_input {test_img} --test_result {npz_out} --tolerance 0.99,0.99 --mlir {mlir_out}"
+        cmd2 = f"conda run -n kbmai run_calibration.py {mlir_out} --dataset {images_path} --input_num 24 --processor cv181x -o {cali_table_out}"
+        cmd3 = f"conda run -n kbmai model_deploy.py --mlir {mlir_out} --quantize INT8 --quant_input --calibration_table {cali_table_out} --chip cv181x --processor cv181x --test_input {npz_out} --test_reference {npz_out} --tolerance 0.9,0.6 --model {cvimodel_out}"
+        
+        os.system(cmd1)
+        os.system(cmd2)
+        os.system(cmd3)
+
+        if os.path.exists(cvimodel_out):
+            mud_out = os.path.join(project_path, "output", "model.mud")
+            labels_str = ", ".join(model_label)
+            mud_content = (
+                "[basic]\n"
+                "type = cvimodel\n"
+                "model = model.cvimodel\n\n"
+                "[extra]\n"
+                "model_type = classifier\n"
+                "input_type = rgb\n"
+                "mean = 123.675, 116.28, 103.53\n"
+                "scale = 0.017124753831663668, 0.01750700280112045, 0.017429193899782137\n"
+                f"labels = {labels_str}\n"
+            )
+            with open(mud_out, "w") as f:
+                f.write(mud_content)
+            q.announce({"time":time.time(), "event": "initial", "msg" : "Created model.mud"})
+        else:
+            q.announce({"time":time.time(), "event": "error", "msg" : "Failed to generate cvimodel"})
+
+    else:
+        with torch.no_grad():
+            q.announce({"time":time.time(), "event": "initial", "msg" : "Start converting onnx to ncnn"})
+            onnx_to_ncnn(input_shape, onnx=onnx_out, ncnn_param=ncnn_out_param, ncnn_bin=ncnn_out_bin)
+            print("convert end, ctrl-c to exit")
+
+        output_model_optimize_bin_path = os.path.join(project_path, "output", "model_opt.bin")
+        output_model_optimize_param_path = os.path.join(project_path, "output", "model_opt.param")
+        q.announce({"time":time.time(), "event": "initial", "msg" : "Start optimizing model"})
+        cmd = f"tools/spnntools optimize {ncnn_out_param} {ncnn_out_bin} {output_model_optimize_param_path} {output_model_optimize_bin_path}"
+        os.system(cmd)
+
+        output_model_calibrate_table = os.path.join(project_path, "output", "model_opt.table")
+        q.announce({"time":time.time(), "event": "initial", "msg" : "Start calibrating model"})
+        cmd2 = "tools/spnntools calibrate -p=\""+output_model_optimize_param_path+"\" -b=\""+output_model_optimize_bin_path+"\" -i=\""+images_path+"\" -o=\""+output_model_calibrate_table+"\" --m=\"127.5,127.5,127.5\" --n=\"0.0078125, 0.0078125, 0.0078125\" --size=\""+str(input_size[0])+","+str(+input_size[1])+"\" -c -t=4"
+        os.system(cmd2)
+
+        output_model_quantize_bin_path = os.path.join(project_path, "output", "model_int8.bin")
+        output_model_quantize_param_path = os.path.join(project_path, "output", "model_int8.param")
+        q.announce({"time":time.time(), "event": "initial", "msg" : "Start quantizing model"})
+        cmd3 = "tools/spnntools quantize "+output_model_optimize_param_path+" "+output_model_optimize_bin_path+" "+output_model_quantize_param_path+" "+output_model_quantize_bin_path+" "+output_model_calibrate_table
+        os.system(cmd3)
+        
     STAGE = 5
     q.announce({"time":time.time(), "event": "convert_model_end", "msg" : "Model converted successfully"})
     
