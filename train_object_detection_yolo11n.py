@@ -134,7 +134,7 @@ def convert_voc_to_yolo(project_dir, labels, train_split=80):
         
     return yaml_path
 
-def train_object_detection_yolo5s(project, path_to_save, project_dir, q,
+def train_object_detection_yolo11n(project, path_to_save, project_dir, q,
         high_resolution=True, 
         multi_scale=True, 
         cuda=True, 
@@ -168,16 +168,16 @@ def train_object_detection_yolo5s(project, path_to_save, project_dir, q,
     q.announce({"time":time.time(), "event": "dataset_loading", "msg" : "Dataset converted successfully."})
     print("----------------------------------------------------------")
 
-    # Load a YOLO5s model
-    # User specified "yolo5s.pt" or model_type could carry the actual file needed, but let's default to yolo5s.pt
-    model_file = "yolo5s.pt" if model_weight is None else model_weight
+    # Load a yolo11n model
+    # User specified "yolo11n.pt" or model_type could carry the actual file needed, but let's default to yolo11n.pt
+    model_file = "yolo11n.pt" if model_weight is None else model_weight
     if not os.path.exists(model_file):
-        # Allow ultralytics to download it if it's "yolo5s.pt"
+        # Allow ultralytics to download it if it's "yolo11n.pt"
         # We can just pass the string to YOLO natively
         pass
 
     try:
-        model = YOLO("yolo5s.pt")
+        model = YOLO("yolo11n.pt")
     except Exception as e:
         q.announce({"time":time.time(), "event": "error", "msg" : f"Could not initialize YOLO model: {e}"})
         return False
@@ -285,12 +285,12 @@ def train_object_detection_yolo5s(project, path_to_save, project_dir, q,
             device=device,
             lr0=learning_rate,
             project=path_to_save,
-            name="yolo5s_run",
+            name="yolo11n_run",
             exist_ok=True, # allow overwriting previous attempt
             verbose=True
         )
         
-        best_pt_path = os.path.join(path_to_save, "yolo5s_run", "weights", "best.pt")
+        best_pt_path = os.path.join(path_to_save, "yolo11n_run", "weights", "best.pt")
         target_pt_path = os.path.join(path_to_save, "best_map.pth")
         
         if os.path.exists(best_pt_path):

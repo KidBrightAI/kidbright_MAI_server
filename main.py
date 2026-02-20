@@ -26,7 +26,7 @@ sys.path.append(".")
 from train_object_detection import train_object_detection
 from train_image_classification import train_image_classification
 from train_voice_classification import train_voice_classification
-from train_object_detection_yolo5s import train_object_detection_yolo5s
+from train_object_detection_yolo11n import train_object_detection_yolo11n
 #---- converter ----#
 from convert import torch_to_onnx, onnx_to_ncnn, gen_input
 import torch
@@ -164,11 +164,11 @@ def convert_model(project_id, q):
     elif modelType == "slim_yolo_v2":
         best_file = os.path.join(project_path, "output", "best_map.pth")
         
-    elif modelType == "yolo5s":
-        best_file = os.path.join(project_path, "output", "yolo5s_run", "weights", "best.pt")
+    elif modelType == "yolo11n":
+        best_file = os.path.join(project_path, "output", "yolo11n_run", "weights", "best.pt")
         # Handle case where Ultralytics nests the project inside runs/detect/
         if not os.path.exists(best_file):
-            alt_best_file = os.path.join("runs", "detect", project_path, "output", "yolo5s_run", "weights", "best.pt")
+            alt_best_file = os.path.join("runs", "detect", project_path, "output", "yolo11n_run", "weights", "best.pt")
             if os.path.exists(alt_best_file):
                 best_file = alt_best_file
 
@@ -225,14 +225,14 @@ def convert_model(project_id, q):
         net.load_state_dict(torch.load(best_file, map_location=device))
         net.to(device).eval()
 
-    elif modelType == "yolo5s":
+    elif modelType == "yolo11n":
         input_size = [224, 320]
         net = None
 
 
     print('Finished loading model!')
 
-    if modelType != "yolo5s":
+    if modelType != "yolo11n":
         # convert to onnx and ncnn
         from torchsummary import summary
         summary(net.to("cpu"), input_size=(3, input_size[0], input_size[1]), device="cpu")
@@ -253,7 +253,7 @@ def convert_model(project_id, q):
             torch_to_onnx(net.to("cpu"), input_shape, onnx_out, device="cpu")
         net.no_post_process = False
     else:
-        # Export YOLO5s to ONNX using Ultralytics
+        # Export yolo11n to ONNX using Ultralytics
         from ultralytics import YOLO
         yolo_model = YOLO(best_file)
         q.announce({"time":time.time(), "event": "initial", "msg" : "Start converting YOLO model to onnx"})
@@ -310,8 +310,8 @@ def convert_model(project_id, q):
         else:
             q.announce({"time":time.time(), "event": "error", "msg" : "Failed to generate cvimodel"})
 
-    elif board_id == "kidbright-mai-plus" and (modelType == "yolo5s"):
-        q.announce({"time":time.time(), "event": "initial", "msg" : "Start converting ONNX to cvimodel for YOLO5s"})
+    elif board_id == "kidbright-mai-plus" and (modelType == "yolo11n"):
+        q.announce({"time":time.time(), "event": "initial", "msg" : "Start converting ONNX to cvimodel for yolo11n"})
         mlir_out = os.path.join(project_path, "output", "model.mlir")
         npz_out = os.path.join(project_path, "output", "model_top_outputs.npz")
         cali_table_out = os.path.join(project_path, "output", "model_cali_table")
@@ -322,7 +322,7 @@ def convert_model(project_id, q):
         # output_names can be modified downstream if you export from another YOLO layer.
         output_names = "/model.24/m.0/Conv_output_0,/model.24/m.1/Conv_output_0,/model.24/m.2/Conv_output_0"
         
-        cmd1 = f"conda run -n kbmai model_transform.py --model_name yolo5s --model_def {onnx_out} --input_shapes [[1,3,640,640]] --mean 0,0,0 --scale 0.00392156862745098,0.00392156862745098,0.00392156862745098 --keep_aspect_ratio --pixel_format rgb --channel_format nchw --output_names \"{output_names}\" --test_input {test_img} --test_result {npz_out} --tolerance 0.99,0.99 --mlir {mlir_out}"
+        cmd1 = f"conda run -n kbmai model_transform.py --model_name yolo11n --model_def {onnx_out} --input_shapes [[1,3,640,640]] --mean 0,0,0 --scale 0.00392156862745098,0.00392156862745098,0.00392156862745098 --keep_aspect_ratio --pixel_format rgb --channel_format nchw --output_names \"{output_names}\" --test_input {test_img} --test_result {npz_out} --tolerance 0.99,0.99 --mlir {mlir_out}"
         
         cmd2 = f"conda run -n kbmai run_calibration.py {mlir_out} --dataset {images_path} --input_num 24 -o {cali_table_out}"
         
@@ -456,7 +456,7 @@ def training_task(project_id, q):
             if res:
                 STAGE = 3
         
-        elif modelType == "yolo5s":
+        elif modelType == "yolo11n":
             res = train_object_detection_yolo11(project, output_path, project_folder,q,
                 high_resolution=True, 
                 multi_scale=True, 
