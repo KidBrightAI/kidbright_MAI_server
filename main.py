@@ -320,7 +320,7 @@ def convert_model(project_id, q):
         
         test_img_transform = os.path.join("data", "test_images2", "cat.jpg")
         
-        output_names = "/model.23/Concat_output_0,/model.23/Concat_1_output_0,/model.23/Concat_2_output_0"
+        output_names = "/model.23/Sigmoid_output_0"
         
         cmd1_list = [
             f"conda run -n kbmai model_transform.py",
