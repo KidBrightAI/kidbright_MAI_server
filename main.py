@@ -320,13 +320,13 @@ def convert_model(project_id, q):
         
         test_img_transform = os.path.join("data", "test_images2", "cat.jpg")
         
-        output_names = "/model.23/dfl/conv/Conv_output_0,/model.23/Sigmoid_output_0"
+        output_names = "/model.23/Concat_output_0,/model.23/Concat_1_output_0,/model.23/Concat_2_output_0"
         
         cmd1_list = [
             f"conda run -n kbmai model_transform.py",
             f"--model_name yolo11n",
             f"--model_def {onnx_out}",
-            f"--input_shapes \"[[1,3,224,320]]\"",
+            f"--input_shapes [[1,3,224,320]]",
             f"--mean \"0,0,0\"",
             f"--output_names \"{output_names}\"",
             f"--scale \"0.00392156862745098,0.00392156862745098,0.00392156862745098\"",
