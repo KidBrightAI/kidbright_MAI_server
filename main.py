@@ -313,23 +313,62 @@ def convert_model(project_id, q):
     elif board_id == "kidbright-mai-plus" and (modelType == "yolo11n"):
         q.announce({"time":time.time(), "event": "initial", "msg" : "Start converting ONNX to cvimodel for yolo11n"})
         mlir_out = os.path.join(project_path, "output", "model.mlir")
-        npz_out = os.path.join(project_path, "output", "model_top_outputs.npz")
-        cali_table_out = os.path.join(project_path, "output", "model_cali_table")
+        npz_out = os.path.join(project_path, "output", "yolo11s_top_outputs.npz")
+        npz_in_out = os.path.join(project_path, "output", "yolo11n_in_f32.npz")
+        cali_table_out = os.path.join(project_path, "output", "yolo11n_cali_table")
         cvimodel_out = os.path.join(project_path, "output", "model.cvimodel")
         
-        test_img = os.path.join("data", "test_images2", "cat.jpg")
+        test_img_transform = os.path.join("data", "test_images2", "cat.jpg")
         
-        # output_names can be modified downstream if you export from another YOLO layer.
-        output_names = "/model.24/m.0/Conv_output_0,/model.24/m.1/Conv_output_0,/model.24/m.2/Conv_output_0"
+        output_names = "/model.23/Concat_output_0,/model.23/Concat_1_output_0,/model.23/Concat_2_output_0"
         
-        cmd1 = f"conda run -n kbmai model_transform.py --model_name yolo11n --model_def {onnx_out} --input_shapes [[1,3,640,640]] --mean 0,0,0 --scale 0.00392156862745098,0.00392156862745098,0.00392156862745098 --keep_aspect_ratio --pixel_format rgb --channel_format nchw --output_names \"{output_names}\" --test_input {test_img} --test_result {npz_out} --tolerance 0.99,0.99 --mlir {mlir_out}"
+        cmd1_list = [
+            f"conda run -n kbmai model_transform.py",
+            f"--model_name yolo11n",
+            f"--model_def {onnx_out}",
+            f"--input_shapes \"[[1,3,224,224]]\"",
+            f"--mean \"0,0,0\"",
+            f"--output_names \"{output_names}\"",
+            f"--scale \"0.00392156862745098,0.00392156862745098,0.00392156862745098\"",
+            f"--keep_aspect_ratio",
+            f"--pixel_format rgb",
+            f"--channel_format nchw",
+            f"--test_input {test_img_transform}",
+            f"--test_result {npz_out}",
+            f"--tolerance 0.99,0.99",
+            f"--mlir {mlir_out}"
+        ]
+        cmd1 = " ".join(cmd1_list)
         
-        cmd2 = f"conda run -n kbmai run_calibration.py {mlir_out} --dataset {images_path} --input_num 24 -o {cali_table_out}"
+        dataset_path_cali = os.path.join("data", "test_images")
         
-        cmd3 = f"conda run -n kbmai model_deploy.py --mlir {mlir_out} --quantize INT8 --quant_input --calibration_table {cali_table_out} --processor cv181x --test_input {npz_out} --test_reference {npz_out} --tolerance 0.9,0.6 --model {cvimodel_out}"
+        cmd2_list = [
+            f"conda run -n kbmai run_calibration.py",
+            f"{mlir_out}",
+            f"--dataset {dataset_path_cali}",
+            f"--input_num 24",
+            f"-o {cali_table_out}"
+        ]
+        cmd2 = " ".join(cmd2_list)
         
+        cmd3_list = [
+            f"conda run -n kbmai model_deploy.py",
+            f"--mlir {mlir_out}",
+            f"--quantize INT8",
+            f"--calibration_table {cali_table_out}",
+            f"--processor cv181x",
+            f"--test_input {npz_in_out}",
+            f"--test_reference {npz_out}",
+            f"--tolerance 0.9,0.6",
+            f"--model {cvimodel_out}"
+        ]
+        cmd3 = " ".join(cmd3_list)
+        
+        print("Running CMD1:", cmd1)
         os.system(cmd1)
+        print("Running CMD2:", cmd2)
         os.system(cmd2)
+        print("Running CMD3:", cmd3)
         os.system(cmd3)
 
         if os.path.exists(cvimodel_out):
@@ -340,7 +379,7 @@ def convert_model(project_id, q):
                 "type = cvimodel\n"
                 "model = model.cvimodel\n\n"
                 "[extra]\n"
-                "model_type = yolov5s\n"
+                "model_type = yolov11\n"
                 "input_type = rgb\n"
                 "mean = 0, 0, 0\n"
                 "scale = 0.00392156862745098, 0.00392156862745098, 0.00392156862745098\n"
