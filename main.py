@@ -457,7 +457,7 @@ def training_task(project_id, q):
                 STAGE = 3
         
         elif modelType == "yolo11n":
-            res = train_object_detection_yolo11(project, output_path, project_folder,q,
+            res = train_object_detection_yolo11n(project, output_path, project_folder,q,
                 high_resolution=True, 
                 multi_scale=True, 
                 cuda= True if torch.cuda.is_available() else False, 
