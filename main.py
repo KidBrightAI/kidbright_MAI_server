@@ -314,7 +314,6 @@ def convert_model(project_id, q):
         q.announce({"time":time.time(), "event": "initial", "msg" : "Start converting ONNX to cvimodel for YOLO11s"})
         mlir_out = os.path.join(project_path, "output", "model.mlir")
         npz_out = os.path.join(project_path, "output", "model_top_outputs.npz")
-        npz_in_out = os.path.join(project_path, "output", "model_in_f32.npz")
         cali_table_out = os.path.join(project_path, "output", "model_cali_table")
         cvimodel_out = os.path.join(project_path, "output", "model.cvimodel")
         
@@ -325,10 +324,9 @@ def convert_model(project_id, q):
         
         cmd1 = f"conda run -n kbmai model_transform.py --model_name yolo11s --model_def {onnx_out} --input_shapes [[1,3,640,640]] --mean 0,0,0 --scale 0.00392156862745098,0.00392156862745098,0.00392156862745098 --keep_aspect_ratio --pixel_format rgb --channel_format nchw --output_names \"{output_names}\" --test_input {test_img} --test_result {npz_out} --tolerance 0.99,0.99 --mlir {mlir_out}"
         
-        dataset_path = os.path.join(project_path, "yolo_dataset", "images", "train")
-        cmd2 = f"conda run -n kbmai run_calibration.py {mlir_out} --dataset {dataset_path} --input_num 200 -o {cali_table_out}"
+        cmd2 = f"conda run -n kbmai run_calibration.py {mlir_out} --dataset {images_path} --input_num 24 -o {cali_table_out}"
         
-        cmd3 = f"conda run -n kbmai model_deploy.py --mlir {mlir_out} --quantize INT8 --quant_input --calibration_table {cali_table_out} --processor cv181x --test_input {npz_in_out} --test_reference {npz_out} --tolerance 0.9,0.6 --model {cvimodel_out}"
+        cmd3 = f"conda run -n kbmai model_deploy.py --mlir {mlir_out} --quantize INT8 --quant_input --calibration_table {cali_table_out} --processor cv181x --test_input {npz_out} --test_reference {npz_out} --tolerance 0.9,0.6 --model {cvimodel_out}"
         
         os.system(cmd1)
         os.system(cmd2)
