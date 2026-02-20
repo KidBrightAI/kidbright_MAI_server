@@ -161,8 +161,16 @@ def convert_model(project_id, q):
     if modelType.startswith("mobilenet") or modelType == "resnet18" or modelType == "code":
         best_file = os.path.join(project_path, "output", "best_acc.pth")
 
-    elif modelType == "slim_yolo_v2" or modelType == "yolo11" or modelType == "yolo11s":
+    elif modelType == "slim_yolo_v2":
         best_file = os.path.join(project_path, "output", "best_map.pth")
+        
+    elif modelType == "yolo11" or modelType == "yolo11s":
+        best_file = os.path.join(project_path, "output", "yolo11s_run", "weights", "best.pt")
+        # Handle case where Ultralytics nests the project inside runs/detect/
+        if not os.path.exists(best_file):
+            alt_best_file = os.path.join("runs", "detect", project_path, "output", "yolo11s_run", "weights", "best.pt")
+            if os.path.exists(alt_best_file):
+                best_file = alt_best_file
 
     if best_file == None or not os.path.exists(best_file):
         return q.announce({"time":time.time(), "event": "error", "msg" : "No best_map.pth file"})
@@ -310,7 +318,7 @@ def convert_model(project_id, q):
         cali_table_out = os.path.join(project_path, "output", "model_cali_table")
         cvimodel_out = os.path.join(project_path, "output", "model.cvimodel")
         
-        test_img = os.path.join("data", "test_images2", "get.jpg")
+        test_img = os.path.join("data", "test_images2", "cat.jpg")
         
         # output_names can be modified downstream if you export from another YOLO layer.
         output_names = "/model.23/dfl/conv/Conv_output_0,/model.23/Sigmoid_output_0"
@@ -334,7 +342,7 @@ def convert_model(project_id, q):
                 "type = cvimodel\n"
                 "model = model.cvimodel\n\n"
                 "[extra]\n"
-                "model_type = yolov8\n"
+                "model_type = yolov11\n"
                 "input_type = rgb\n"
                 "mean = 0, 0, 0\n"
                 "scale = 0.00392156862745098, 0.00392156862745098, 0.00392156862745098\n"
