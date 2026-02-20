@@ -26,6 +26,7 @@ sys.path.append(".")
 from train_object_detection import train_object_detection
 from train_image_classification import train_image_classification
 from train_voice_classification import train_voice_classification
+from train_object_detection_yolo11s import train_object_detection_yolo11
 #---- converter ----#
 from convert import torch_to_onnx, onnx_to_ncnn, gen_input
 import torch
@@ -362,6 +363,29 @@ def training_task(project_id, q):
                 STAGE = 3
         elif modelType == "slim_yolo_v2":
             res = train_object_detection(project, output_path, project_folder,q,
+                high_resolution=True, 
+                multi_scale=True, 
+                cuda= True if torch.cuda.is_available() else False, 
+                learning_rate=project["trainConfig"]["learning_rate"], 
+                batch_size=project["trainConfig"]["batch_size"],
+                start_epoch=0, 
+                epoch=project["trainConfig"]["epochs"],
+                train_split=project["trainConfig"]["train_split"],
+                model_type=modelType,
+                model_weight=None,
+                validate_matrix=project["trainConfig"]["validateMatrix"],
+                save_method=project["trainConfig"]["saveMethod"],
+                step_lr=(150, 200),
+                labels=model_label,
+                momentum=0.9,
+                weight_decay=5e-4,
+                warm_up_epoch=6
+            )
+            if res:
+                STAGE = 3
+        
+        elif modelType == "yolo11" or modelType == "yolo11s":
+            res = train_object_detection_yolo11(project, output_path, project_folder,q,
                 high_resolution=True, 
                 multi_scale=True, 
                 cuda= True if torch.cuda.is_available() else False, 
