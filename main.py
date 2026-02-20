@@ -252,7 +252,7 @@ def convert_model(project_id, q):
             q.announce({"time":time.time(), "event": "initial", "msg" : "Start converting model to onnx"})
             torch_to_onnx(net.to("cpu"), input_shape, onnx_out, device="cpu")
         net.no_post_process = False
-    else:
+    elif modelType == "yolo11n":
         # Export yolo11n to ONNX using Ultralytics
         from ultralytics import YOLO
         yolo_model = YOLO(best_file)
@@ -261,7 +261,7 @@ def convert_model(project_id, q):
         onnx_out = os.path.join(project_path, "output", "model.onnx")
         
         # YOLO export returns the exported onnx object path
-        exported_path = yolo_model.export(format="onnx", imgsz=input_size[0], opset=11)
+        exported_path = yolo_model.export(format="onnx", imgsz=[224, 320]) #, opset=11)
         
         if exported_path and os.path.exists(exported_path):
             import shutil
@@ -320,13 +320,13 @@ def convert_model(project_id, q):
         
         test_img_transform = os.path.join("data", "test_images2", "cat.jpg")
         
-        output_names = "/model.23/Concat_output_0,/model.23/Concat_1_output_0,/model.23/Concat_2_output_0"
+        output_names = "/model.23/dfl/conv/Conv_output_0,/model.23/Sigmoid_output_0"
         
         cmd1_list = [
             f"conda run -n kbmai model_transform.py",
             f"--model_name yolo11n",
             f"--model_def {onnx_out}",
-            f"--input_shapes \"[[1,3,224,224]]\"",
+            f"--input_shapes \"[[1,3,224,320]]\"",
             f"--mean \"0,0,0\"",
             f"--output_names \"{output_names}\"",
             f"--scale \"0.00392156862745098,0.00392156862745098,0.00392156862745098\"",
@@ -379,7 +379,7 @@ def convert_model(project_id, q):
                 "type = cvimodel\n"
                 "model = model.cvimodel\n\n"
                 "[extra]\n"
-                "model_type = yolov11\n"
+                "model_type = yolo11\n"
                 "input_type = rgb\n"
                 "mean = 0, 0, 0\n"
                 "scale = 0.00392156862745098, 0.00392156862745098, 0.00392156862745098\n"
