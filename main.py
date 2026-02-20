@@ -161,7 +161,7 @@ def convert_model(project_id, q):
     if modelType.startswith("mobilenet") or modelType == "resnet18" or modelType == "code":
         best_file = os.path.join(project_path, "output", "best_acc.pth")
 
-    elif modelType == "slim_yolo_v2":
+    elif modelType == "slim_yolo_v2" or modelType == "yolo11" or modelType == "yolo11s":
         best_file = os.path.join(project_path, "output", "best_map.pth")
 
     if best_file == None or not os.path.exists(best_file):
@@ -217,28 +217,50 @@ def convert_model(project_id, q):
         net.load_state_dict(torch.load(best_file, map_location=device))
         net.to(device).eval()
 
+    elif modelType == "yolo11" or modelType == "yolo11s":
+        input_size = [640, 640]
+        net = None
+
 
     print('Finished loading model!')
 
-    # convert to onnx and ncnn
-    from torchsummary import summary
-    summary(net.to("cpu"), input_size=(3, input_size[0], input_size[1]), device="cpu")
-
-    # convert model    
-    net.no_post_process = True
-    onnx_out= os.path.join(project_path, "output", "model.onnx")
-    ncnn_out_param = os.path.join(project_path, "output", "model.param")
-    ncnn_out_bin = os.path.join(project_path, "output", "model.bin")
-    input_shape = (3, input_size[0], input_size[1])
+    if modelType not in ["yolo11", "yolo11s"]:
+        # convert to onnx and ncnn
+        from torchsummary import summary
+        summary(net.to("cpu"), input_size=(3, input_size[0], input_size[1]), device="cpu")
     
-    os.environ['PKG_CONFIG_PATH'] = ':/root/opencv-3.4.13/lib/pkgconfig'
-    os.environ['LD_LIBRARY_PATH'] += ':/root/opencv-3.4.13/lib'
-    os.environ['PATH'] += ':/root/opencv-3.4.13/bin'
-
-    with torch.no_grad():
-        q.announce({"time":time.time(), "event": "initial", "msg" : "Start converting model to onnx"})
-        torch_to_onnx(net.to("cpu"), input_shape, onnx_out, device="cpu")
-    net.no_post_process = False
+        # convert model    
+        net.no_post_process = True
+        onnx_out= os.path.join(project_path, "output", "model.onnx")
+        ncnn_out_param = os.path.join(project_path, "output", "model.param")
+        ncnn_out_bin = os.path.join(project_path, "output", "model.bin")
+        input_shape = (3, input_size[0], input_size[1])
+        
+        os.environ['PKG_CONFIG_PATH'] = ':/root/opencv-3.4.13/lib/pkgconfig'
+        os.environ['LD_LIBRARY_PATH'] += ':/root/opencv-3.4.13/lib'
+        os.environ['PATH'] += ':/root/opencv-3.4.13/bin'
+    
+        with torch.no_grad():
+            q.announce({"time":time.time(), "event": "initial", "msg" : "Start converting model to onnx"})
+            torch_to_onnx(net.to("cpu"), input_shape, onnx_out, device="cpu")
+        net.no_post_process = False
+    else:
+        # Export YOLO11s to ONNX using Ultralytics
+        from ultralytics import YOLO
+        yolo_model = YOLO(best_file)
+        q.announce({"time":time.time(), "event": "initial", "msg" : "Start converting YOLO11 model to onnx"})
+        
+        onnx_out = os.path.join(project_path, "output", "model.onnx")
+        
+        # YOLO export returns the exported onnx object path
+        exported_path = yolo_model.export(format="onnx", imgsz=input_size[0], opset=11)
+        
+        if exported_path and os.path.exists(exported_path):
+            import shutil
+            shutil.move(exported_path, onnx_out)
+        else:
+            q.announce({"time":time.time(), "event": "error", "msg" : "YOLO11 ONNX export failed"})
+            return
 
     board_id = project.get("currentBoard", {}).get("id", "")
     images_path = os.path.join(project_path, "dataset", "JPEGImages") if modelType == "slim_yolo_v2" else os.path.join("data","test_images")
@@ -272,6 +294,50 @@ def convert_model(project_id, q):
                 "input_type = rgb\n"
                 "mean = 123.675, 116.28, 103.53\n"
                 "scale = 0.017124753831663668, 0.01750700280112045, 0.017429193899782137\n"
+                f"labels = {labels_str}\n"
+            )
+            with open(mud_out, "w") as f:
+                f.write(mud_content)
+            q.announce({"time":time.time(), "event": "initial", "msg" : "Created model.mud"})
+        else:
+            q.announce({"time":time.time(), "event": "error", "msg" : "Failed to generate cvimodel"})
+
+    elif board_id == "kidbright-mai-plus" and (modelType == "yolo11" or modelType == "yolo11s"):
+        q.announce({"time":time.time(), "event": "initial", "msg" : "Start converting ONNX to cvimodel for YOLO11s"})
+        mlir_out = os.path.join(project_path, "output", "model.mlir")
+        npz_out = os.path.join(project_path, "output", "model_top_outputs.npz")
+        npz_in_out = os.path.join(project_path, "output", "model_in_f32.npz")
+        cali_table_out = os.path.join(project_path, "output", "model_cali_table")
+        cvimodel_out = os.path.join(project_path, "output", "model.cvimodel")
+        
+        test_img = os.path.join("data", "test_images2", "get.jpg")
+        
+        # output_names can be modified downstream if you export from another YOLO layer.
+        output_names = "/model.23/dfl/conv/Conv_output_0,/model.23/Sigmoid_output_0"
+        
+        cmd1 = f"conda run -n kbmai model_transform.py --model_name yolo11s --model_def {onnx_out} --input_shapes [[1,3,640,640]] --mean 0,0,0 --scale 0.00392156862745098,0.00392156862745098,0.00392156862745098 --keep_aspect_ratio --pixel_format rgb --channel_format nchw --output_names \"{output_names}\" --test_input {test_img} --test_result {npz_out} --tolerance 0.99,0.99 --mlir {mlir_out}"
+        
+        dataset_path = os.path.join(project_path, "yolo_dataset", "images", "train")
+        cmd2 = f"conda run -n kbmai run_calibration.py {mlir_out} --dataset {dataset_path} --input_num 200 -o {cali_table_out}"
+        
+        cmd3 = f"conda run -n kbmai model_deploy.py --mlir {mlir_out} --quantize INT8 --quant_input --calibration_table {cali_table_out} --processor cv181x --test_input {npz_in_out} --test_reference {npz_out} --tolerance 0.9,0.6 --model {cvimodel_out}"
+        
+        os.system(cmd1)
+        os.system(cmd2)
+        os.system(cmd3)
+
+        if os.path.exists(cvimodel_out):
+            mud_out = os.path.join(project_path, "output", "model.mud")
+            labels_str = ", ".join(model_label)
+            mud_content = (
+                "[basic]\n"
+                "type = cvimodel\n"
+                "model = model.cvimodel\n\n"
+                "[extra]\n"
+                "model_type = yolov8\n"
+                "input_type = rgb\n"
+                "mean = 0, 0, 0\n"
+                "scale = 0.00392156862745098, 0.00392156862745098, 0.00392156862745098\n"
                 f"labels = {labels_str}\n"
             )
             with open(mud_out, "w") as f:
