@@ -266,10 +266,10 @@ def train_object_detection_yolo11(project, path_to_save, project_dir, q,
             epochs=epoch,
             batch=batch_size,
             imgsz=imgsz,
-            device=device,
-            lr0=learning_rate,
-            project=path_to_save,
-            name="yolo11s_run",
+            # device=device,
+            # lr0=learning_rate,
+            # project=path_to_save,
+            # name="yolo11s_run",
             exist_ok=True, # allow overwriting previous attempt
             verbose=True
         )
