@@ -26,7 +26,7 @@ sys.path.append(".")
 from train_object_detection import train_object_detection
 from train_image_classification import train_image_classification
 from train_voice_classification import train_voice_classification
-from train_object_detection_yolo11s import train_object_detection_yolo11
+from train_object_detection_yolo5s import train_object_detection_yolo5s
 #---- converter ----#
 from convert import torch_to_onnx, onnx_to_ncnn, gen_input
 import torch
@@ -164,11 +164,11 @@ def convert_model(project_id, q):
     elif modelType == "slim_yolo_v2":
         best_file = os.path.join(project_path, "output", "best_map.pth")
         
-    elif modelType == "yolo11" or modelType == "yolo11s":
-        best_file = os.path.join(project_path, "output", "yolo11s_run", "weights", "best.pt")
+    elif modelType == "yolo5s":
+        best_file = os.path.join(project_path, "output", "yolo5s_run", "weights", "best.pt")
         # Handle case where Ultralytics nests the project inside runs/detect/
         if not os.path.exists(best_file):
-            alt_best_file = os.path.join("runs", "detect", project_path, "output", "yolo11s_run", "weights", "best.pt")
+            alt_best_file = os.path.join("runs", "detect", project_path, "output", "yolo5s_run", "weights", "best.pt")
             if os.path.exists(alt_best_file):
                 best_file = alt_best_file
 
@@ -225,14 +225,14 @@ def convert_model(project_id, q):
         net.load_state_dict(torch.load(best_file, map_location=device))
         net.to(device).eval()
 
-    elif modelType == "yolo11" or modelType == "yolo11s":
-        input_size = [640, 640]
+    elif modelType == "yolo5s":
+        input_size = [224, 320]
         net = None
 
 
     print('Finished loading model!')
 
-    if modelType not in ["yolo11", "yolo11s"]:
+    if modelType != "yolo5s":
         # convert to onnx and ncnn
         from torchsummary import summary
         summary(net.to("cpu"), input_size=(3, input_size[0], input_size[1]), device="cpu")
@@ -253,10 +253,10 @@ def convert_model(project_id, q):
             torch_to_onnx(net.to("cpu"), input_shape, onnx_out, device="cpu")
         net.no_post_process = False
     else:
-        # Export YOLO11s to ONNX using Ultralytics
+        # Export YOLO5s to ONNX using Ultralytics
         from ultralytics import YOLO
         yolo_model = YOLO(best_file)
-        q.announce({"time":time.time(), "event": "initial", "msg" : "Start converting YOLO11 model to onnx"})
+        q.announce({"time":time.time(), "event": "initial", "msg" : "Start converting YOLO model to onnx"})
         
         onnx_out = os.path.join(project_path, "output", "model.onnx")
         
@@ -267,7 +267,7 @@ def convert_model(project_id, q):
             import shutil
             shutil.move(exported_path, onnx_out)
         else:
-            q.announce({"time":time.time(), "event": "error", "msg" : "YOLO11 ONNX export failed"})
+            q.announce({"time":time.time(), "event": "error", "msg" : "YOLO ONNX export failed"})
             return
 
     board_id = project.get("currentBoard", {}).get("id", "")
@@ -310,8 +310,8 @@ def convert_model(project_id, q):
         else:
             q.announce({"time":time.time(), "event": "error", "msg" : "Failed to generate cvimodel"})
 
-    elif board_id == "kidbright-mai-plus" and (modelType == "yolo11" or modelType == "yolo11s"):
-        q.announce({"time":time.time(), "event": "initial", "msg" : "Start converting ONNX to cvimodel for YOLO11s"})
+    elif board_id == "kidbright-mai-plus" and (modelType == "yolo5s"):
+        q.announce({"time":time.time(), "event": "initial", "msg" : "Start converting ONNX to cvimodel for YOLO5s"})
         mlir_out = os.path.join(project_path, "output", "model.mlir")
         npz_out = os.path.join(project_path, "output", "model_top_outputs.npz")
         cali_table_out = os.path.join(project_path, "output", "model_cali_table")
@@ -320,9 +320,9 @@ def convert_model(project_id, q):
         test_img = os.path.join("data", "test_images2", "cat.jpg")
         
         # output_names can be modified downstream if you export from another YOLO layer.
-        output_names = "/model.23/dfl/conv/Conv_output_0,/model.23/Sigmoid_output_0"
+        output_names = "/model.24/m.0/Conv_output_0,/model.24/m.1/Conv_output_0,/model.24/m.2/Conv_output_0"
         
-        cmd1 = f"conda run -n kbmai model_transform.py --model_name yolo11s --model_def {onnx_out} --input_shapes [[1,3,640,640]] --mean 0,0,0 --scale 0.00392156862745098,0.00392156862745098,0.00392156862745098 --keep_aspect_ratio --pixel_format rgb --channel_format nchw --output_names \"{output_names}\" --test_input {test_img} --test_result {npz_out} --tolerance 0.99,0.99 --mlir {mlir_out}"
+        cmd1 = f"conda run -n kbmai model_transform.py --model_name yolo5s --model_def {onnx_out} --input_shapes [[1,3,640,640]] --mean 0,0,0 --scale 0.00392156862745098,0.00392156862745098,0.00392156862745098 --keep_aspect_ratio --pixel_format rgb --channel_format nchw --output_names \"{output_names}\" --test_input {test_img} --test_result {npz_out} --tolerance 0.99,0.99 --mlir {mlir_out}"
         
         cmd2 = f"conda run -n kbmai run_calibration.py {mlir_out} --dataset {images_path} --input_num 24 -o {cali_table_out}"
         
@@ -340,7 +340,7 @@ def convert_model(project_id, q):
                 "type = cvimodel\n"
                 "model = model.cvimodel\n\n"
                 "[extra]\n"
-                "model_type = yolov11\n"
+                "model_type = yolov5s\n"
                 "input_type = rgb\n"
                 "mean = 0, 0, 0\n"
                 "scale = 0.00392156862745098, 0.00392156862745098, 0.00392156862745098\n"
@@ -456,7 +456,7 @@ def training_task(project_id, q):
             if res:
                 STAGE = 3
         
-        elif modelType == "yolo11" or modelType == "yolo11s":
+        elif modelType == "yolo5s":
             res = train_object_detection_yolo11(project, output_path, project_folder,q,
                 high_resolution=True, 
                 multi_scale=True, 
