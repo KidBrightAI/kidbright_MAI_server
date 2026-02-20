@@ -196,23 +196,32 @@ def train_object_detection_yolo11(project, path_to_save, project_dir, q,
 
     def on_train_batch_start(trainer):
         max_batch = len(trainer.train_loader) if hasattr(trainer, 'train_loader') else 0
+        batch_i = getattr(trainer, 'batch_i', 0)
         q.announce({
             "time": time.time(), 
             "event": "batch_start", 
-            "msg": f"Start batch {trainer.batch_i}/{max_batch} ... training",
-            "batch": trainer.batch_i,
+            "msg": f"Start batch {batch_i}/{max_batch} ... training",
+            "batch": batch_i,
             "max_batch": max_batch
         })
         
     def on_train_batch_end(trainer):
         max_batch = len(trainer.train_loader) if hasattr(trainer, 'train_loader') else 0
-        # train_loss usually in trainer.loss_items
-        train_loss = float(sum(trainer.loss_items)) if hasattr(trainer, 'loss_items') else 0.0
+        batch_i = getattr(trainer, 'batch_i', 0)
+        
+        train_loss = 0.0
+        if hasattr(trainer, 'tloss'):
+            try:
+                # trainer.tloss is usually a tensor containing the loss items (box, cls, dfl), we can sum it to get total batch loss
+                train_loss = float(trainer.tloss.sum())
+            except:
+                pass
+
         q.announce({
             "time": time.time(), 
             "event": "batch_end", 
-            "msg": f"End batch {trainer.batch_i}/{max_batch} ... training",
-            "batch": trainer.batch_i,
+            "msg": f"End batch {batch_i}/{max_batch} ... training",
+            "batch": batch_i,
             "max_batch": max_batch,
             "matric": {
                 "train_loss": train_loss
@@ -220,12 +229,19 @@ def train_object_detection_yolo11(project, path_to_save, project_dir, q,
         })
 
     def on_fit_epoch_end(trainer):
-        max_batch = len(trainer.train_loader) if hasattr(trainer, 'train_loader') else 0
-        metrics = trainer.metrics or {}
-        val_acc = metrics.get('metrics/mAP50(B)', 0.0)
-        val_precision = metrics.get('metrics/precision(B)', 0.0)
-        val_recall = metrics.get('metrics/recall(B)', 0.0)
-        train_loss = float(sum(trainer.loss_items)) if hasattr(trainer, 'loss_items') else 0.0
+        metrics = getattr(trainer, 'metrics', {})
+        # Keys in metrics can vary, try a few common patterns Ultralytics uses
+        val_acc = metrics.get('metrics/mAP50(B)', metrics.get('val/mAP50(B)', 0.0))
+        val_precision = metrics.get('metrics/precision(B)', metrics.get('val/precision(B)', 0.0))
+        val_recall = metrics.get('metrics/recall(B)', metrics.get('val/recall(B)', 0.0))
+        
+        train_loss = 0.0
+        if hasattr(trainer, 'tloss'):
+            try:
+                train_loss = float(trainer.tloss.sum())
+            except:
+                pass
+
         q.announce({
             "time": time.time(), 
             "event": "epoch_end", 
@@ -266,10 +282,10 @@ def train_object_detection_yolo11(project, path_to_save, project_dir, q,
             epochs=epoch,
             batch=batch_size,
             imgsz=imgsz,
-            # device=device,
-            # lr0=learning_rate,
-            # project=path_to_save,
-            # name="yolo11s_run",
+            device=device,
+            lr0=learning_rate,
+            project=path_to_save,
+            name="yolo11s_run",
             exist_ok=True, # allow overwriting previous attempt
             verbose=True
         )
