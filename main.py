@@ -314,7 +314,7 @@ def convert_model(project_id, q):
         q.announce({"time":time.time(), "event": "initial", "msg" : "Start converting ONNX to cvimodel for yolo11n"})
         mlir_out = os.path.join(project_path, "output", "model.mlir")
         npz_out = os.path.join(project_path, "output", "yolo11s_top_outputs.npz")
-        npz_in_out = os.path.join(project_path, "output", "yolo11n_in_f32.npz")
+        npz_in_out = os.path.join("yolo11n_in_f32.npz")
         cali_table_out = os.path.join(project_path, "output", "yolo11n_cali_table")
         cvimodel_out = os.path.join(project_path, "output", "model.cvimodel")
         
