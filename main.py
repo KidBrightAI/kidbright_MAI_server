@@ -380,6 +380,7 @@ def convert_model(project_id, q):
                 "model = model.cvimodel\n\n"
                 "[extra]\n"
                 "model_type = yolo11\n"
+                "type = obb\n"
                 "input_type = rgb\n"
                 "mean = 0, 0, 0\n"
                 "scale = 0.00392156862745098, 0.00392156862745098, 0.00392156862745098\n"
