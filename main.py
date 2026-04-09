@@ -164,11 +164,11 @@ def convert_model(project_id, q):
     elif modelType == "slim_yolo_v2":
         best_file = os.path.join(project_path, "output", "best_map.pth")
         
-    elif modelType == "yolo11n":
-        best_file = os.path.join(project_path, "output", "yolo11n_run", "weights", "best.pt")
-        # Handle case where Ultralytics nests the project inside runs/detect/
+    elif modelType in ("yolo11n", "yolo11s"):
+        run_name = f"{modelType}_run"
+        best_file = os.path.join(project_path, "output", run_name, "weights", "best.pt")
         if not os.path.exists(best_file):
-            alt_best_file = os.path.join("runs", "detect", project_path, "output", "yolo11n_run", "weights", "best.pt")
+            alt_best_file = os.path.join("runs", "detect", project_path, "output", run_name, "weights", "best.pt")
             if os.path.exists(alt_best_file):
                 best_file = alt_best_file
 
@@ -252,8 +252,8 @@ def convert_model(project_id, q):
             q.announce({"time":time.time(), "event": "initial", "msg" : "Start converting model to onnx"})
             torch_to_onnx(net.to("cpu"), input_shape, onnx_out, device="cpu")
         net.no_post_process = False
-    elif modelType == "yolo11n":
-        # Export yolo11n to ONNX using Ultralytics
+    elif modelType in ("yolo11n", "yolo11s"):
+        # Export YOLO11 to ONNX using Ultralytics
         from ultralytics import YOLO
         yolo_model = YOLO(best_file)
         q.announce({"time":time.time(), "event": "initial", "msg" : "Start converting YOLO model to onnx"})
@@ -310,21 +310,23 @@ def convert_model(project_id, q):
         else:
             q.announce({"time":time.time(), "event": "error", "msg" : "Failed to generate cvimodel"})
 
-    elif board_id == "kidbright-mai-plus" and (modelType == "yolo11n"):
-        q.announce({"time":time.time(), "event": "initial", "msg" : "Start converting ONNX to cvimodel for yolo11n"})
+    elif board_id == "kidbright-mai-plus" and modelType in ("yolo11n", "yolo11s"):
+        q.announce({"time":time.time(), "event": "initial", "msg" : f"Start converting ONNX to cvimodel for {modelType}"})
         mlir_out = os.path.join(project_path, "output", "model.mlir")
-        npz_out = os.path.join(project_path, "output", "yolo11s_top_outputs.npz")
-        npz_in_out = os.path.join("yolo11n_in_f32.npz")
-        cali_table_out = os.path.join(project_path, "output", "yolo11n_cali_table")
+        npz_out = os.path.join(project_path, "output", f"{modelType}_top_outputs.npz")
+        npz_in_out = f"{modelType}_in_f32.npz"
+        cali_table_out = os.path.join(project_path, "output", f"{modelType}_cali_table")
         cvimodel_out = os.path.join(project_path, "output", "model.cvimodel")
-        
+
         test_img_transform = os.path.join("data", "test_images2", "cat.jpg")
-        
-        output_names = "/model.23/Sigmoid_output_0"
-        
+
+        output_names = "/model.23/dfl/conv/Conv_output_0,/model.23/Sigmoid_output_0"
+
+        deploy_tolerance = {"yolo11n": "0.9,0.6", "yolo11s": "0.85,0.5"}[modelType]
+
         cmd1_list = [
             f"conda run -n kbmai model_transform.py",
-            f"--model_name yolo11n",
+            f"--model_name {modelType}",
             f"--model_def {onnx_out}",
             f"--input_shapes [[1,3,224,320]]",
             f"--mean \"0,0,0\"",
@@ -339,9 +341,9 @@ def convert_model(project_id, q):
             f"--mlir {mlir_out}"
         ]
         cmd1 = " ".join(cmd1_list)
-        
+
         dataset_path_cali = os.path.join("data", "test_images")
-        
+
         cmd2_list = [
             f"conda run -n kbmai run_calibration.py",
             f"{mlir_out}",
@@ -350,7 +352,7 @@ def convert_model(project_id, q):
             f"-o {cali_table_out}"
         ]
         cmd2 = " ".join(cmd2_list)
-        
+
         cmd3_list = [
             f"conda run -n kbmai model_deploy.py",
             f"--mlir {mlir_out}",
@@ -359,11 +361,11 @@ def convert_model(project_id, q):
             f"--processor cv181x",
             f"--test_input {npz_in_out}",
             f"--test_reference {npz_out}",
-            f"--tolerance 0.9,0.6",
+            f"--tolerance {deploy_tolerance}",
             f"--model {cvimodel_out}"
         ]
         cmd3 = " ".join(cmd3_list)
-        
+
         print("Running CMD1:", cmd1)
         os.system(cmd1)
         print("Running CMD2:", cmd2)
@@ -380,7 +382,6 @@ def convert_model(project_id, q):
                 "model = model.cvimodel\n\n"
                 "[extra]\n"
                 "model_type = yolo11\n"
-                "type = obb\n"
                 "input_type = rgb\n"
                 "mean = 0, 0, 0\n"
                 "scale = 0.00392156862745098, 0.00392156862745098, 0.00392156862745098\n"
@@ -496,7 +497,7 @@ def training_task(project_id, q):
             if res:
                 STAGE = 3
         
-        elif modelType == "yolo11n":
+        elif modelType in ("yolo11n", "yolo11s"):
             res = train_object_detection_yolo11n(project, output_path, project_folder,q,
                 high_resolution=True, 
                 multi_scale=True, 

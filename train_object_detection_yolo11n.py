@@ -10,12 +10,16 @@ import sys
 try:
     from ultralytics import YOLO
 except ImportError:
-    # Ensure ultralytics is installed. The prompt says sys.path.append("ultralytics")
     sys.path.append("ultralytics")
     try:
         from ultralytics import YOLO
     except ImportError:
-        pass # Will raise error at runtime if ultralytics is genuinely missing
+        pass
+
+YOLO11_VARIANTS = {
+    "yolo11n": {"weight": "yolo11n.pt", "run_name": "yolo11n_run"},
+    "yolo11s": {"weight": "yolo11s.pt", "run_name": "yolo11s_run"},
+}
 
 def convert_voc_to_yolo(project_dir, labels, train_split=80):
     dataset_dir = os.path.join(project_dir, "dataset")
@@ -170,14 +174,11 @@ def train_object_detection_yolo11n(project, path_to_save, project_dir, q,
 
     # Load a yolo11n model
     # User specified "yolo11n.pt" or model_type could carry the actual file needed, but let's default to yolo11n.pt
-    model_file = "yolo11n.pt" if model_weight is None else model_weight
-    if not os.path.exists(model_file):
-        # Allow ultralytics to download it if it's "yolo11n.pt"
-        # We can just pass the string to YOLO natively
-        pass
+    variant = YOLO11_VARIANTS.get(model_type, YOLO11_VARIANTS["yolo11n"])
+    weight_file = model_weight if model_weight else variant["weight"]
 
     try:
-        model = YOLO("yolo11n.pt")
+        model = YOLO(weight_file)
     except Exception as e:
         q.announce({"time":time.time(), "event": "error", "msg" : f"Could not initialize YOLO model: {e}"})
         return False
@@ -277,6 +278,7 @@ def train_object_detection_yolo11n(project, path_to_save, project_dir, q,
     
     try:
         # Run YOLO training
+        run_name = variant["run_name"]
         results = model.train(
             data=yaml_path,
             epochs=epoch,
@@ -285,12 +287,12 @@ def train_object_detection_yolo11n(project, path_to_save, project_dir, q,
             device=device,
             lr0=learning_rate,
             project=path_to_save,
-            name="yolo11n_run",
-            exist_ok=True, # allow overwriting previous attempt
+            name=run_name,
+            exist_ok=True,
             verbose=True
         )
-        
-        best_pt_path = os.path.join(path_to_save, "yolo11n_run", "weights", "best.pt")
+
+        best_pt_path = os.path.join(path_to_save, run_name, "weights", "best.pt")
         target_pt_path = os.path.join(path_to_save, "best_map.pth")
         
         if os.path.exists(best_pt_path):
