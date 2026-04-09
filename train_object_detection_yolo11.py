@@ -6,15 +6,7 @@ import yaml
 import torch
 import xml.etree.ElementTree as ET
 
-import sys
-try:
-    from ultralytics import YOLO
-except ImportError:
-    sys.path.append("ultralytics")
-    try:
-        from ultralytics import YOLO
-    except ImportError:
-        pass
+from ultralytics import YOLO
 
 YOLO11_VARIANTS = {
     "yolo11n": {"weight": "yolo11n.pt", "run_name": "yolo11n_run"},
