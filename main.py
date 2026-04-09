@@ -26,7 +26,7 @@ sys.path.append(".")
 from train_object_detection import train_object_detection
 from train_image_classification import train_image_classification
 from train_voice_classification import train_voice_classification
-from train_object_detection_yolo11n import train_object_detection_yolo11n
+from train_object_detection_yolo11 import train_object_detection_yolo11
 #---- converter ----#
 from convert import torch_to_onnx, onnx_to_ncnn, gen_input
 import torch
@@ -225,14 +225,14 @@ def convert_model(project_id, q):
         net.load_state_dict(torch.load(best_file, map_location=device))
         net.to(device).eval()
 
-    elif modelType == "yolo11n":
+    elif modelType in ("yolo11n", "yolo11s"):
         input_size = [224, 320]
         net = None
 
 
     print('Finished loading model!')
 
-    if modelType != "yolo11n":
+    if modelType not in ("yolo11n", "yolo11s"):
         # convert to onnx and ncnn
         from torchsummary import summary
         summary(net.to("cpu"), input_size=(3, input_size[0], input_size[1]), device="cpu")
@@ -498,7 +498,7 @@ def training_task(project_id, q):
                 STAGE = 3
         
         elif modelType in ("yolo11n", "yolo11s"):
-            res = train_object_detection_yolo11n(project, output_path, project_folder,q,
+            res = train_object_detection_yolo11(project, output_path, project_folder,q,
                 high_resolution=True, 
                 multi_scale=True, 
                 cuda= True if torch.cuda.is_available() else False, 

@@ -138,7 +138,7 @@ def convert_voc_to_yolo(project_dir, labels, train_split=80):
         
     return yaml_path
 
-def train_object_detection_yolo11n(project, path_to_save, project_dir, q,
+def train_object_detection_yolo11(project, path_to_save, project_dir, q,
         high_resolution=True, 
         multi_scale=True, 
         cuda=True, 
