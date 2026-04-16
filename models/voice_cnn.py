@@ -6,32 +6,24 @@ from backbone import *
 import numpy as np
 import tools
 
-class Voice1DCNN(nn.Module):
-    """1D CNN that treats MFCC as time-series: (B, 3, 13, 147) → reshape (B, 39, 147) → Conv1d"""
+class VoiceCNN(nn.Module):
+    """2D CNN for MFCC spectrogram classification (NCNN compatible)"""
     def __init__(self, num_classes=2):
-        super(Voice1DCNN, self).__init__()
-        self.features = nn.Sequential(
-            nn.Conv1d(39, 64, kernel_size=5, padding=2),
-            nn.BatchNorm1d(64),
-            nn.ReLU(),
-            nn.MaxPool1d(2),
-            nn.Conv1d(64, 64, kernel_size=3, padding=1),
-            nn.BatchNorm1d(64),
-            nn.ReLU(),
-            nn.AdaptiveAvgPool1d(1),
-        )
-        self.classifier = nn.Sequential(
+        super(VoiceCNN, self).__init__()
+        self.net = nn.Sequential(
+            nn.Conv2d(3, 32, 3, padding=1), nn.BatchNorm2d(32), nn.ReLU(),
+            nn.MaxPool2d(2),
+            nn.Conv2d(32, 64, 3, padding=1), nn.BatchNorm2d(64), nn.ReLU(),
+            nn.MaxPool2d(2),
+            nn.Conv2d(64, 128, 3, padding=1), nn.BatchNorm2d(128), nn.ReLU(),
+            nn.AdaptiveAvgPool2d(1),
             nn.Flatten(),
-            nn.Dropout(0.3),
-            nn.Linear(64, num_classes),
+            nn.Dropout(0.4),
+            nn.Linear(128, num_classes),
         )
 
     def forward(self, x, target=None):
-        B, C, H, W = x.shape
-        x = x.reshape(B, C * H, W)  # (B, 3*13, 147) = (B, 39, 147)
-        x = self.features(x)
-        x = self.classifier(x)
-        return x
+        return self.net(x)
 
 
 class VoiceCnn(nn.Module):
