@@ -30,7 +30,7 @@ def train_voice_classification(project, path_to_save, project_dir,q,
         labels=None,
         weight_decay=5e-4,
         warm_up_epoch=6,
-        input_shape = (3, 147, 13)
+        input_shape = (3, 13, 147)
     ):
     
     os.makedirs(path_to_save, exist_ok=True)

@@ -217,7 +217,7 @@ def convert_model(project_id, q):
         net.to(device).eval()
 
     elif modelType == "code" and project["projectType"] == "VOICE_CLASSIFICATION":
-        input_size = [147, 13]
+        input_size = [13, 147]
         model_label = [ l["label"] for l in project["labels"]]
         model_label.sort()
         from models.voice_cnn import VoiceCnn
