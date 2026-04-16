@@ -282,7 +282,7 @@ def convert_model(project_id, q):
     board_id = project.get("currentBoard", {}).get("id", "")
     images_path = os.path.join(project_path, "dataset", "JPEGImages") if modelType == "slim_yolo_v2" else os.path.join("data","test_images")
 
-    if board_id == "kidbright-mai-plus" and modelType.startswith("mobilenet"):
+    if board_id == "kidbright-mai-plus" and (modelType.startswith("mobilenet") or modelType in ("resnet18", "voice1d-cnn")):
         q.announce({"time":time.time(), "event": "initial", "msg" : "Start converting onnx to cvimodel"})
         mlir_out = os.path.join(project_path, "output", "mobilenet.mlir")
         npz_out = os.path.join(project_path, "output", "mobilenet_top_outputs.npz")
@@ -291,7 +291,7 @@ def convert_model(project_id, q):
         
         test_img = os.path.join("data", "test_images2", "cat.jpg")
 
-        cmd1 = f"conda run -n kbmai model_transform.py --model_name mobilenet --model_def {onnx_out} --input_shapes [[1,3,224,224]] --mean 123.675,116.28,103.53 --scale 0.0171,0.0175,0.0174 --keep_aspect_ratio --pixel_format rgb --channel_format nchw --test_input {test_img} --test_result {npz_out} --tolerance 0.99,0.99 --mlir {mlir_out}"
+        cmd1 = f"conda run -n kbmai model_transform.py --model_name mobilenet --model_def {onnx_out} --input_shapes [[1,3,{input_size[0]},{input_size[1]}]] --mean 123.675,116.28,103.53 --scale 0.0171,0.0175,0.0174 --keep_aspect_ratio --pixel_format rgb --channel_format nchw --test_input {test_img} --test_result {npz_out} --tolerance 0.99,0.99 --mlir {mlir_out}"
         cmd2 = f"conda run -n kbmai run_calibration.py {mlir_out} --dataset {images_path} --input_num 24 --processor cv181x -o {cali_table_out}"
         cmd3 = f"conda run -n kbmai model_deploy.py --mlir {mlir_out} --quantize INT8 --quant_input --calibration_table {cali_table_out} --chip cv181x --processor cv181x --test_input {npz_out} --test_reference {npz_out} --tolerance 0.9,0.6 --model {cvimodel_out}"
         
