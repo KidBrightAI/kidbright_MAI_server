@@ -87,22 +87,12 @@ def train_voice_classification(project, path_to_save, project_dir,q,
             os.rmdir(os.path.join(data_dir, label))
             
     train_transforms = transforms.Compose([
-        #transforms.Grayscale(num_output_channels=3),
-        #transforms.Resize(input_shape[1:]),
-        #transforms.Resize(input_shape),
-        #transforms.Resize(255),
-        #transforms.RandomRotation(30),
-        #transforms.RandomResizedCrop(224),
-        #transforms.RandomHorizontalFlip(),
+        transforms.Resize(input_shape[1:]),  # resize MFCC to fixed (13, 147) regardless of duration
         transforms.ToTensor(),
         transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
     ])
     test_transforms = transforms.Compose([
-        #transforms.Grayscale(num_output_channels=3),
-        #transforms.Resize(input_shape[1:]),
-        #transforms.Resize(input_shape),
-        #transforms.Resize(255),
-        #transforms.CenterCrop(224),
+        transforms.Resize(input_shape[1:]),  # resize MFCC to fixed (13, 147) regardless of duration
         transforms.ToTensor(),
         transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
     ])
