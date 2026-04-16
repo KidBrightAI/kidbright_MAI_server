@@ -216,6 +216,15 @@ def convert_model(project_id, q):
         net.load_state_dict(torch.load(best_file, map_location=device))
         net.to(device).eval()
 
+    elif modelType == "voice1d-cnn":
+        input_size = [13, 147]
+        model_label = [ l["label"] for l in project["labels"]]
+        model_label.sort()
+        from models.voice_cnn import Voice1DCNN
+        net = Voice1DCNN(num_classes=num_classes)
+        net.load_state_dict(torch.load(best_file, map_location=device))
+        net.to(device).eval()
+
     elif modelType == "code" and project["projectType"] == "VOICE_CLASSIFICATION":
         input_size = [13, 147]
         model_label = [ l["label"] for l in project["labels"]]

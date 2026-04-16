@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torchvision import models, datasets, transforms
-from models.voice_cnn import VoiceCnn
+from models.voice_cnn import VoiceCnn, Voice1DCNN
 # import resnet as models
 import numpy as np
 import cv2
@@ -128,6 +128,8 @@ def train_voice_classification(project, path_to_save, project_dir,q,
         net = models.resnet101(pretrained=True)
     elif model_type == 'resnet152':
         net = models.resnet152(pretrained=True)        
+    elif model_type == 'voice1d-cnn':
+        net = Voice1DCNN(num_classes=num_classes)
     elif model_type == 'code':
         net = VoiceCnn(device, project["trainConfig"]["code"], input_size=input_shape, num_classes=num_classes, trainable=True)
     else:
@@ -139,7 +141,7 @@ def train_voice_classification(project, path_to_save, project_dir,q,
         net.classifier[1] = nn.Linear(in_features=model.classifier[1].in_features, out_features=num_classes, bias=True)
     elif model_type.startswith('resnet'):
         net.fc = nn.Linear(in_features=net.fc.in_features, out_features=num_classes, bias=True)
-    elif model_type == 'code':
+    elif model_type in ('code', 'voice1d-cnn'):
         pass
     else:
         print('model type error')
