@@ -6,20 +6,20 @@ from backbone import *
 import numpy as np
 import tools
 
+
 class VoiceCNN(nn.Module):
-    """2D CNN for MFCC spectrogram classification (NCNN compatible)"""
+    """IPU-safe 2D CNN for MFCC voice classification.
+    Uses only Conv2d + ReLU + MaxPool2d + Flatten + Linear — no BatchNorm,
+    no AdaptiveAvgPool, no Dropout. Verified on MaixII V831 NPU."""
     def __init__(self, num_classes=2):
         super(VoiceCNN, self).__init__()
         self.net = nn.Sequential(
-            nn.Conv2d(3, 32, 3, padding=1), nn.BatchNorm2d(32), nn.ReLU(),
-            nn.MaxPool2d(2),
-            nn.Conv2d(32, 64, 3, padding=1), nn.BatchNorm2d(64), nn.ReLU(),
-            nn.MaxPool2d(2),
-            nn.Conv2d(64, 128, 3, padding=1), nn.BatchNorm2d(128), nn.ReLU(),
-            nn.AdaptiveAvgPool2d(1),
+            nn.Conv2d(3, 32, 3, padding=1), nn.ReLU(), nn.MaxPool2d(2),
+            nn.Conv2d(32, 64, 3, padding=1), nn.ReLU(), nn.MaxPool2d(2),
+            nn.Conv2d(64, 128, 3, padding=1), nn.ReLU(), nn.MaxPool2d(2),
             nn.Flatten(),
-            nn.Dropout(0.4),
-            nn.Linear(128, num_classes),
+            nn.Linear(2304, 64), nn.ReLU(),
+            nn.Linear(64, num_classes),
         )
 
     def forward(self, x, target=None):
