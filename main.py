@@ -158,7 +158,7 @@ def convert_model(project_id, q):
     best_file = None
     modelType = "code" if "code" in project["trainConfig"] else project["trainConfig"]["modelType"]
 
-    if modelType.startswith("mobilenet") or modelType == "resnet18" or modelType == "code":
+    if modelType.startswith("mobilenet") or modelType in ("resnet18", "code", "voice-cnn"):
         best_file = os.path.join(project_path, "output", "best_acc.pth")
 
     elif modelType == "slim_yolo_v2":
