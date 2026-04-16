@@ -128,7 +128,7 @@ def train_voice_classification(project, path_to_save, project_dir,q,
         net = models.resnet101(pretrained=True)
     elif model_type == 'resnet152':
         net = models.resnet152(pretrained=True)        
-    elif model_type == 'voice-cnn':
+    elif model_type in ('voice-cnn', 'voice1d-cnn'):
         net = VoiceCNN(num_classes=num_classes)
     elif model_type == 'code':
         net = VoiceCnn(device, project["trainConfig"]["code"], input_size=input_shape, num_classes=num_classes, trainable=True)
@@ -141,7 +141,7 @@ def train_voice_classification(project, path_to_save, project_dir,q,
         net.classifier[1] = nn.Linear(in_features=model.classifier[1].in_features, out_features=num_classes, bias=True)
     elif model_type.startswith('resnet'):
         net.fc = nn.Linear(in_features=net.fc.in_features, out_features=num_classes, bias=True)
-    elif model_type in ('code', 'voice-cnn'):
+    elif model_type in ('code', 'voice-cnn', 'voice1d-cnn'):
         pass
     else:
         print('model type error')

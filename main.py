@@ -216,7 +216,7 @@ def convert_model(project_id, q):
         net.load_state_dict(torch.load(best_file, map_location=device))
         net.to(device).eval()
 
-    elif modelType == "voice-cnn":
+    elif modelType in ("voice-cnn", "voice1d-cnn"):
         input_size = [13, 147]
         model_label = [ l["label"] for l in project["labels"]]
         model_label.sort()
@@ -282,7 +282,7 @@ def convert_model(project_id, q):
     board_id = project.get("currentBoard", {}).get("id", "")
     images_path = os.path.join(project_path, "dataset", "JPEGImages") if modelType == "slim_yolo_v2" else os.path.join("data","test_images")
 
-    if board_id == "kidbright-mai-plus" and (modelType.startswith("mobilenet") or modelType in ("resnet18", "voice-cnn")):
+    if board_id == "kidbright-mai-plus" and (modelType.startswith("mobilenet") or modelType in ("resnet18", "voice-cnn", "voice1d-cnn")):
         q.announce({"time":time.time(), "event": "initial", "msg" : "Start converting onnx to cvimodel"})
         mlir_out = os.path.join(project_path, "output", "mobilenet.mlir")
         npz_out = os.path.join(project_path, "output", "mobilenet_top_outputs.npz")
