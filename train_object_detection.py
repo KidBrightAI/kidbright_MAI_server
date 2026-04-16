@@ -60,14 +60,14 @@ def train_object_detection(project, path_to_save, project_dir,q,
         device = torch.device("cpu")
         print("use cpu")
 
-    # multi-scale
+    # multi-scale (V831 AWNN supports max 224x224)
     if multi_scale:
         print('use the multi-scale trick ...')
-        train_size = [640, 640]
-        val_size = [416, 416]
+        train_size = [320, 320]
+        val_size = [224, 224]
     else:
-        train_size = [416, 416]
-        val_size = [416, 416]
+        train_size = [224, 224]
+        val_size = [224, 224]
 
     cfg = train_cfg
     # dataset and evaluator

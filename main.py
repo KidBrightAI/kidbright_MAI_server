@@ -184,7 +184,7 @@ def convert_model(project_id, q):
     model_label.sort()
     num_classes = len(model_label)
     if modelType == "slim_yolo_v2":
-        input_size = [416 , 416]        
+        input_size = [224, 224]        
         print("label:", model_label)
         if modelType == "slim_yolo_v2":
             from models.slim_yolo_v2 import SlimYOLOv2
