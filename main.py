@@ -46,7 +46,7 @@ if UNAME.system == "Windows":
 elif 'COLAB_GPU' in os.environ:
     BACKEND = "COLAB"
     DEVICE = "COLAB"
-else:
+elif os.path.exists("/proc/device-tree/model"):
     with open("/proc/device-tree/model", "r") as f:
         model = f.read().strip()
         if "Jetson Nano" in model:
@@ -58,6 +58,10 @@ else:
         elif "Nano" in model:
             DEVICE = "NANO"
             BACKEND = "EDGE"
+else:
+    # Generic Linux / WSL / Docker — e.g. desktop with CUDA GPU
+    BACKEND = "EDGE"
+    DEVICE = "WSL" if "microsoft" in UNAME.release.lower() else "LINUX"
 
 PROJECT_PATH = "./projects" if BACKEND == "COLAB" else "./projects"
 PROJECT_FILENAME = "project.json"
@@ -253,9 +257,12 @@ def convert_model(project_id, q):
         ncnn_out_bin = os.path.join(project_path, "output", "model.bin")
         input_shape = (3, input_size[0], input_size[1])
         
-        os.environ['PKG_CONFIG_PATH'] = ':/root/opencv-3.4.13/lib/pkgconfig'
-        os.environ['LD_LIBRARY_PATH'] += ':/root/opencv-3.4.13/lib'
-        os.environ['PATH'] += ':/root/opencv-3.4.13/bin'
+        opencv_root = os.environ.get("KBMAI_OPENCV_ROOT", "/root/opencv-3.4.13")
+        extra_lib = f'{opencv_root}/lib_extra'
+        os.environ['PKG_CONFIG_PATH'] = os.environ.get('PKG_CONFIG_PATH', '') + f':{opencv_root}/lib/pkgconfig'
+        ld = os.environ.get('LD_LIBRARY_PATH', '')
+        os.environ['LD_LIBRARY_PATH'] = f'{ld}:{opencv_root}/lib:{extra_lib}'
+        os.environ['PATH'] = os.environ.get('PATH', '') + f':{opencv_root}/bin'
     
         with torch.no_grad():
             q.announce({"time":time.time(), "event": "initial", "msg" : "Start converting model to onnx"})
@@ -447,12 +454,13 @@ def training_task(project_id, q):
         #     time.sleep(1)
         q.announce({"time":time.time(), "event": "initial", "msg" : "Start training step 1 ... prepare dataset"})
         
-        # unzip project        
+        # unzip project (skip if already extracted — CLI / re-run case)
         project_zip = os.path.join(PROJECT_PATH, project_id, PROJECT_ZIP)
         project_folder = os.path.join(PROJECT_PATH, project_id)
-        with zipfile.ZipFile(project_zip, 'r') as zip_ref:
-            zip_ref.extractall(project_folder)
-        os.remove(project_zip)
+        if os.path.exists(project_zip):
+            with zipfile.ZipFile(project_zip, 'r') as zip_ref:
+                zip_ref.extractall(project_folder)
+            os.remove(project_zip)
         # read project file
         project = helper.read_json_file(os.path.join(PROJECT_PATH, project_id, PROJECT_FILENAME))        
         q.announce({"time":time.time(), "event": "initial", "msg" : "target project id : "+project_id})
