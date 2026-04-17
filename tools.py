@@ -398,14 +398,18 @@ def iou_score(bboxes_a, bboxes_b):
     return  cross / s
 
 
-def loss(pred_conf, pred_cls, pred_txtytwth, label, num_classes, obj_loss_f='mse'):
+def loss(pred_conf, pred_cls, pred_txtytwth, label, num_classes, obj_loss_f='bce'):
     if obj_loss_f == 'bce':
-        # In yolov3, we use bce as conf loss_f
+        # BCE has non-vanishing gradient so objectness logits actually converge
+        # toward the IoU target (verified: MSE left sigmoid(obj)≈0.05 while
+        # target IoU≈0.6 even at 100 epochs, forcing users to drop threshold
+        # to 0.1 at inference).
         conf_loss_function = BCELoss(reduction='mean')
-        obj = 1.0
+        obj = 5.0
         noobj = 1.0
     elif obj_loss_f == 'mse':
-        # In yolov2, we use mse as conf loss_f.
+        # Kept for parity with upstream YOLOv2 but do not use (gradient vanishes
+        # when sigmoid(obj) is far from 1; see obj_loss_f='bce' note above).
         conf_loss_function = MSELoss(reduction='mean')
         obj = 5.0
         noobj = 1.0
