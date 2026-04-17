@@ -86,15 +86,16 @@ def train_voice_classification(project, path_to_save, project_dir,q,
         if len(os.listdir(os.path.join(data_dir, label))) == 0:
             os.rmdir(os.path.join(data_dir, label))
             
+    # Match V831 AWNN hardware range (see train_image_classification.py for rationale).
     train_transforms = transforms.Compose([
         transforms.Resize(input_shape[1:]),  # resize MFCC to fixed (13, 147) regardless of duration
         transforms.ToTensor(),
-        transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+        transforms.Normalize([0.5, 0.5, 0.5], [128 / 255, 128 / 255, 128 / 255])
     ])
     test_transforms = transforms.Compose([
         transforms.Resize(input_shape[1:]),  # resize MFCC to fixed (13, 147) regardless of duration
         transforms.ToTensor(),
-        transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+        transforms.Normalize([0.5, 0.5, 0.5], [128 / 255, 128 / 255, 128 / 255])
     ])
 
     trainset = datasets.ImageFolder(os.path.join(data_dir, 'train'), transform=train_transforms)

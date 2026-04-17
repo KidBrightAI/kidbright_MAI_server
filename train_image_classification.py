@@ -84,19 +84,27 @@ def train_image_classification(project, path_to_save, project_dir,q,
         if len(os.listdir(os.path.join(data_dir, label))) == 0:
             os.rmdir(os.path.join(data_dir, label))
             
+    # V831 AWNN hardware range: it expects normalized input within ~[-1, +1].
+    # ImageNet stats (mean=0.485 / std=0.229) produce ~[-2.2, +2.3] which AWNN clips
+    # and causes "awnn_normalize ... is not correct" warnings + degraded on-device
+    # accuracy even when calibration matches. Using (x-127.5)/128 keeps everything
+    # in [-0.996, +0.996] and matches the generator/calibration values exactly.
+    #   PyTorch:      Normalize([0.5]*3, [128/255]*3)
+    #   Calibration:  mean=127.5,  norm=1/128 = 0.0078125
+    #   Inference:    mean=127.5,  norm=0.0078125
     train_transforms = transforms.Compose([
         transforms.Resize(255),
         transforms.RandomRotation(30),
         transforms.RandomResizedCrop(224),
         transforms.RandomHorizontalFlip(),
         transforms.ToTensor(),
-        transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+        transforms.Normalize([0.5, 0.5, 0.5], [128 / 255, 128 / 255, 128 / 255])
     ])
     test_transforms = transforms.Compose([
         transforms.Resize(255),
         transforms.CenterCrop(224),
         transforms.ToTensor(),
-        transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+        transforms.Normalize([0.5, 0.5, 0.5], [128 / 255, 128 / 255, 128 / 255])
     ])
 
     trainset = datasets.ImageFolder(os.path.join(data_dir, 'train'), transform=train_transforms)

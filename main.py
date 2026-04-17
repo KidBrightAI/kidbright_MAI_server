@@ -423,14 +423,11 @@ def convert_model(project_id, q):
 
         output_model_calibrate_table = os.path.join(project_path, "output", "model_opt.table")
         q.announce({"time":time.time(), "event": "initial", "msg" : "Start calibrating model"})
-        # YOLO slim keeps legacy [0,1]-style preprocessing; classification/voice use ImageNet stats
-        # to match train_image_classification.py / train_voice_classification.py Normalize().
-        if modelType == "slim_yolo_v2":
-            calib_mean = "127.5,127.5,127.5"
-            calib_norm = "0.0078125,0.0078125,0.0078125"
-        else:
-            calib_mean = "123.675,116.28,103.53"
-            calib_norm = "0.01712475,0.01750700,0.01742919"
+        # V831 AWNN expects normalized input within ~[-1, +1]. Training + calibration +
+        # inference all use (x-127.5)/128 so the network sees the same range end-to-end.
+        # See train_image_classification.py for rationale.
+        calib_mean = "127.5,127.5,127.5"
+        calib_norm = "0.0078125,0.0078125,0.0078125"
         cmd2 = "tools/spnntools calibrate -p=\""+output_model_optimize_param_path+"\" -b=\""+output_model_optimize_bin_path+"\" -i=\""+images_path+"\" -o=\""+output_model_calibrate_table+"\" --m=\""+calib_mean+"\" --n=\""+calib_norm+"\" --size=\""+str(input_size[0])+","+str(+input_size[1])+"\" -c -t=4"
         os.system(cmd2)
 
