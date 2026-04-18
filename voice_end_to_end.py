@@ -62,18 +62,24 @@ def mel(nFilters, FFTLen, sampRate):
 MEL_M = mel(NFILTERS, FFTLen, RATE)
 
 def doMelSpec(signal):
+    """Vectorized log-mel-spectrogram. Batches all frames through np.fft.fft
+    in one call instead of per-frame looping.
+    """
     lenSig = len(signal)
     nframes = int((lenSig - FrameLen) / FrameShift)
-    out = np.zeros((NFILTERS, nframes))
-    minPow = 1e-50
-    for fr in range(nframes - 1):
-        start = fr * FrameShift
-        cur = signal[start:start + FrameLen] * WIN
-        cur[1:] -= cur[:-1] * 0.95
-        fft = np.fft.fft(cur, FFTLen)
-        fft[np.abs(fft) < minPow] = minPow
-        out[:, fr] = np.log(np.dot(MEL_M, np.abs(fft[:FFTLen // 2]) ** 2))
-    return out
+    if nframes <= 1:
+        return np.zeros((NFILTERS, max(nframes, 1)))
+    from numpy.lib.stride_tricks import as_strided
+    s = signal.astype(np.float64, copy=False)
+    strides = (s.strides[0] * FrameShift, s.strides[0])
+    frames = as_strided(s, shape=(nframes, FrameLen), strides=strides).copy()
+    frames *= WIN
+    frames[:, 1:] -= frames[:, :-1] * 0.95
+    spec = np.fft.fft(frames, FFTLen, axis=1)
+    mag_sq = np.abs(spec[:, :FFTLen // 2]) ** 2
+    mag_sq[mag_sq < 1e-50] = 1e-50
+    mel_power = mag_sq @ MEL_M.T
+    return np.log(mel_power).T
 
 
 def ts(label, t0):
