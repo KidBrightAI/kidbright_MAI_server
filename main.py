@@ -221,7 +221,9 @@ def convert_model(project_id, q):
         net.to(device).eval()
 
     elif modelType == "voice-cnn":
-        input_size = [13, 147]
+        _H = int(os.environ.get("KBMAI_VOICE_INPUT_H", "40"))
+        _W = int(os.environ.get("KBMAI_VOICE_INPUT_W", "147"))
+        input_size = [_H, _W]
         model_label = [ l["label"] for l in project["labels"]]
         model_label.sort()
         from models.voice_cnn import VoiceCNN

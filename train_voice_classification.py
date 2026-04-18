@@ -30,8 +30,17 @@ def train_voice_classification(project, path_to_save, project_dir,q,
         labels=None,
         weight_decay=5e-4,
         warm_up_epoch=6,
-        input_shape = (3, 13, 147)
+        input_shape = (3, 40, 47)
     ):
+    # Allow overriding input H (40=log-mel, 13=legacy MFCC) + W via env vars so
+    # main.py convert + VoiceCNN + this script stay in lockstep.
+    # Default W=47 matches the actual 1-sec MFCC width — the old 147 value came
+    # from a bogus Resize that stretched 47→147 for no feature gain but 3× more
+    # conv MACs. Dropping it ~3× faster forward on CPU.
+    _H = int(os.environ.get("KBMAI_VOICE_INPUT_H", str(input_shape[1])))
+    _W = int(os.environ.get("KBMAI_VOICE_INPUT_W", str(input_shape[2])))
+    input_shape = (input_shape[0], _H, _W)
+    print(f"[voice] input_shape={input_shape}")
 
     os.makedirs(path_to_save, exist_ok=True)
     
@@ -90,10 +99,10 @@ def train_voice_classification(project, path_to_save, project_dir,q,
     # Assumes the MFCC PNGs in the dataset were generated with full-range
     # (min,max)->(0,255) scaling (the fixed voice_mfcc.py on the board). Older
     # datasets saved with np.max() only lose the negative log-spectrum half and
-    # have to be regenerated from the WAVs in dataset/sound/ via tools/regen_mfcc.py.
+    # have to be regenerated from the WAVs in dataset/sound/ via regen_mfcc.py.
     train_transforms = transforms.Compose([
-        transforms.Resize(input_shape[1:]),  # resize MFCC to fixed (13, 147) regardless of duration
-        transforms.Grayscale(num_output_channels=3),  # MFCC is grayscale; replicate to 3ch for ImageFolder loader
+        transforms.Resize(input_shape[1:]),      # (H, W) — log-mel 40x147 or MFCC 13x147
+        transforms.Grayscale(num_output_channels=3),  # MFCC/log-mel is grayscale; replicate to 3ch
         transforms.ToTensor(),
         transforms.Normalize([0.5, 0.5, 0.5], [128 / 255, 128 / 255, 128 / 255])
     ])
