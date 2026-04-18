@@ -11,16 +11,17 @@ __all__ = ['darknet19', 'darknet53']
 
 
 class Conv_BN_LeakyReLU(nn.Module):
-    # Name kept for backwards compatibility with existing checkpoints; the actual
-    # activation is ReLU6. LeakyReLU's unbounded negative tail expands the INT8
-    # quantize range so each bin gets coarser on V831/AWNN — measured on-device
-    # dropped int8 hit@0.5 from 9/10 (ReLU6) to 5/10 (LeakyReLU) on dog/phone.
+    # Name kept for backwards compatibility with existing checkpoints; actual
+    # activation is plain ReLU. V831 AWNN runs ReLU on NPU (~60 ms forward for
+    # slim_yolo_v2 @ 224) but offloads ReLU6 to CPU (~520 ms, 9× slower).
+    # ReLU is the sweet spot: near-ReLU6 int8 accuracy (8/10 vs 9/10 hit@0.5
+    # on dog/phone) while staying on NPU for real-time fps.
     def __init__(self, in_channels, out_channels, ksize, padding=0, stride=1, dilation=1):
         super(Conv_BN_LeakyReLU, self).__init__()
         self.convs = nn.Sequential(
             nn.Conv2d(in_channels, out_channels, ksize, padding=padding, stride=stride, dilation=dilation),
             nn.BatchNorm2d(out_channels),
-            nn.ReLU6(inplace=True),
+            nn.ReLU(inplace=True),
         )
 
     def forward(self, x):
