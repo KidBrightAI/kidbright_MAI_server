@@ -44,6 +44,12 @@ class SlimYOLOv2(nn.Module):
         # prediction layer
         self.pred = nn.Conv2d(512, self.anchor_number*(1 + 4 + self.num_classes), 1)
 
+        # Optional QAT: wrap every Conv2d with symmetric INT8 fake quant so the
+        # network learns weights robust to spnntools post-training quantization.
+        # Activated only when KBMAI_USE_QAT=1; no-op otherwise.
+        from utils.qat import apply_qat_if_enabled
+        apply_qat_if_enabled(self)
+
     def create_grid(self, input_size):
         w, h = input_size[1], input_size[0]
         # generate grid cells

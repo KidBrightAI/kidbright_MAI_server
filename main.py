@@ -196,8 +196,10 @@ def convert_model(project_id, q):
             detect_threshold = float(project["trainConfig"]["objectThreshold"])
             iou_threshold = float(project["trainConfig"]["iouThreshold"])
             net = SlimYOLOv2(device, input_size=input_size, num_classes=num_classes, conf_thresh=detect_threshold, nms_thresh=iou_threshold, anchor_size=anchor_size)
-        
-        net.load_state_dict(torch.load(best_file, map_location=device))
+
+        # strict=False tolerates QAT buffers (act_scale/_qat_steps) present when
+        # the checkpoint was trained under KBMAI_USE_QAT=1. Weights still load.
+        net.load_state_dict(torch.load(best_file, map_location=device), strict=False)
         net.to(device).eval()
 
     elif modelType.startswith("mobilenet"):
@@ -307,7 +309,16 @@ def convert_model(project_id, q):
 
     board_id = project.get("currentBoard", {}).get("id", "")
     if modelType == "slim_yolo_v2":
-        images_path = os.path.join(project_path, "dataset", "JPEGImages")
+        # Allow overriding the calibration folder for slim_yolo_v2 so tests can
+        # substitute an augmented set (wider pixel/brightness coverage → better
+        # INT8 range estimates than the tiny raw JPEGImages dir).
+        override = os.environ.get("KBMAI_SLIM_CALIB_DIR")
+        if override and os.path.isdir(override):
+            images_path = override
+            q.announce({"time": time.time(), "event": "initial",
+                        "msg": f"slim_yolo_v2 calibration using override dir: {override}"})
+        else:
+            images_path = os.path.join(project_path, "dataset", "JPEGImages")
     elif modelType == "voice-cnn" or (modelType == "code" and project.get("projectType") == "VOICE_CLASSIFICATION"):
         # Voice MFCC spectrograms have very different activation statistics from
         # natural images, so calibrating against data/test_images (face photos)
