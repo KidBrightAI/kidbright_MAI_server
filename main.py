@@ -247,6 +247,24 @@ def convert_model(project_id, q):
 
     print('Finished loading model!')
 
+    # Voice-cnn on V831 (kidbright-mai) always takes the numpy fp32 CPU path.
+    # Every attempt at INT8 (spnntools per-tensor, modern ncnn per-channel, QAT,
+    # mel-spec, arch variants) collapses the tiny classifier head. Export the
+    # trained weights as a single .npz that voice_cpu_infer.py on-board can load
+    # and forward through numpy matmul at ~50-200 ms/clip.
+    board_id_early = project.get("currentBoard", {}).get("id", "")
+    if modelType == "voice-cnn" and board_id_early == "kidbright-mai":
+        npz_out = os.path.join(project_path, "output", "model_cpu.npz")
+        sd_np = {k: v.detach().cpu().numpy() for k, v in net.state_dict().items()}
+        np.savez(npz_out, labels=np.array(model_label), **sd_np)
+        q.announce({"time": time.time(), "event": "initial",
+                    "msg": f"voice: saved fp32 numpy weights to {os.path.basename(npz_out)} "
+                           f"({os.path.getsize(npz_out)} B)"})
+        STAGE = 5
+        q.announce({"time": time.time(), "event": "convert_model_end",
+                    "msg": "Model converted successfully (voice CPU path)"})
+        return
+
     if modelType not in ("yolo11n", "yolo11s"):
         # convert to onnx and ncnn
         from torchsummary import summary
@@ -521,6 +539,43 @@ def training_task(project_id, q):
         model_label.sort()
         modelType = "code" if "code" in project["trainConfig"] else project["trainConfig"]["modelType"]
         if project["projectType"] == "VOICE_CLASSIFICATION":
+            # Regenerate dataset/mfcc/ as 40-bin log-mel from the WAVs so training
+            # features match the on-board CPU inference pipeline. Auto-detect the
+            # input W (frames) from the first WAV's sample count so projects with
+            # any recording duration (1 s, 3 s, ...) work without the user
+            # touching env vars.
+            sound_dir = os.path.join(project_folder, "dataset", "sound")
+            mfcc_dir = os.path.join(project_folder, "dataset", "mfcc")
+            if os.path.isdir(sound_dir):
+                import regen_melspec as _rms
+                import wave as _wv
+                detected_W = None
+                for cls in sorted(os.listdir(sound_dir)):
+                    cdir = os.path.join(sound_dir, cls)
+                    if not os.path.isdir(cdir):
+                        continue
+                    wavs = [f for f in sorted(os.listdir(cdir)) if f.endswith(".wav")]
+                    if not wavs:
+                        continue
+                    with _wv.open(os.path.join(cdir, wavs[0]), "rb") as _wf:
+                        _nsamples = _wf.getnframes()
+                    FL = int(0.040 * 44100); FS = int(0.040 * 44100 / 2)
+                    detected_W = int((_nsamples - FL) / FS)
+                    break
+                if detected_W is None:
+                    detected_W = 147  # reasonable default for 3 s audio
+                q.announce({"time": time.time(), "event": "initial",
+                            "msg": f"voice: auto-detected input_W={detected_W} from wav"})
+                # Replace any IDE-generated MFCC PNGs with fresh log-mel from wav
+                if os.path.isdir(mfcc_dir):
+                    shutil.rmtree(mfcc_dir)
+                # Call regen_melspec.main() by argv injection (keeps its signature simple)
+                _saved_argv = sys.argv
+                sys.argv = ["regen_melspec.py", sound_dir, mfcc_dir]
+                _rms.main()
+                sys.argv = _saved_argv
+                os.environ["KBMAI_VOICE_INPUT_H"] = "40"
+                os.environ["KBMAI_VOICE_INPUT_W"] = str(detected_W)
             res = train_voice_classification(project, output_path, project_folder,q,
                 cuda= True if torch.cuda.is_available() else False, 
                 learning_rate=project["trainConfig"]["learning_rate"],  
