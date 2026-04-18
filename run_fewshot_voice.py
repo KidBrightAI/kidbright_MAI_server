@@ -1,23 +1,24 @@
 #!/usr/bin/env python
-"""Phase 3: feature-extractor + cosine nearest-centroid classifier.
+"""Train a DSCNN voice-cnn model + export ONNX embedding + fp32 centroids.
 
-The small Linear(128, N) classification head is what collapses under V831
-AWNN per-tensor int8 quantization. This script trains a DSCNN voice model
-end-to-end with the classifier (so features get discriminative gradients),
-then exports only the 128-dim pre-classifier embedding as the deployed int8
-model. Per-class centroids are computed on the board (or simulated on a
-calibrated runtime) from the training MFCCs and shipped alongside the model.
-On the board, classification is:
+The exported artifacts are used by the numpy CPU inference path on V831
+(see voice_cpu_infer.py + voice_end_to_end.py). Centroids are saved as
+json so a future few-shot enrollment UX can compare against them.
 
-    x = model.forward(mfcc)          # int8 128-dim embedding
-    s = cosine_similarity(x, centroids[N, 128])
-    pred = argmax(s)
-
-This bypasses the fragile small-FC quantization entirely — classification is
-done in Python on the CPU side with float centroids.
+Auto-resolves repo root from __file__ so this works from anywhere
+(Colab, WSL, any other host) without hard-coded paths.
 
 Usage:
     python run_fewshot_voice.py --project-zip voice_mel.zip --id voice_fs
+    # or for 3-second audio projects:
+    KBMAI_VOICE_INPUT_W=147 python run_fewshot_voice.py --project-zip X.zip --id Y
+
+Environment:
+    KBMAI_VOICE_INPUT_H (default 40)   — mel bins
+    KBMAI_VOICE_INPUT_W (default 47)   — frames (1s @ 50 fps; use 147 for 3s)
+    KBMAI_VOICE_EMB     (default 128)  — embedding dim (pointwise conv output)
+    KBMAI_VOICE_CHANS   (default 32,64,128) — conv channel widths; smaller is
+                                      faster on-board (e.g. 8,16,32 for ~55ms/forward).
 """
 from __future__ import annotations
 
@@ -29,7 +30,10 @@ import sys
 import time
 import zipfile
 
-HERE = "/home/comdet/kidbright_MAI_server"
+# Auto-locate the repo root (the directory this file lives in) so relative
+# paths like projects/… and models/… work whether we're launched from WSL,
+# Colab, or any other cwd.
+HERE = os.path.dirname(os.path.abspath(__file__))
 os.chdir(HERE)
 sys.path.insert(0, HERE)
 
@@ -84,7 +88,8 @@ def main():
     args = ap.parse_args()
 
     H = int(os.environ.get("KBMAI_VOICE_INPUT_H", "40"))
-    W = int(os.environ.get("KBMAI_VOICE_INPUT_W", "47"))
+    W_env = os.environ.get("KBMAI_VOICE_INPUT_W")  # None -> auto-detect from WAVs
+    W = int(W_env) if W_env else None
 
     proj_dir = os.path.join("projects", args.id)
     if os.path.exists(proj_dir):
@@ -96,9 +101,50 @@ def main():
         proj = json.load(f)
     labels = sorted(l["label"] for l in proj["labels"])
     nc = len(labels)
+
+    # Auto-regen mel-spec from wav so training features match what
+    # voice_end_to_end.py computes on-board at inference time, and auto-detect
+    # input W from the first wav so we don't need KBMAI_VOICE_INPUT_W.
+    sound_dir = os.path.join(proj_dir, "dataset", "sound")
+    mfcc_dir = os.path.join(proj_dir, "dataset", "mfcc")
+    if os.path.isdir(sound_dir):
+        import regen_melspec as _rms
+        import wave
+        # probe first wav for nframes
+        for cls in sorted(os.listdir(sound_dir)):
+            cdir = os.path.join(sound_dir, cls)
+            if not os.path.isdir(cdir): continue
+            wavs = [f for f in sorted(os.listdir(cdir)) if f.endswith(".wav")]
+            if wavs:
+                with wave.open(os.path.join(cdir, wavs[0]), "rb") as wf:
+                    n_samples = wf.getnframes()
+                FrameLen = int(0.040 * 44100); FrameShift = int(0.040 * 44100 / 2)
+                detected_W = int((n_samples - FrameLen) / FrameShift)
+                break
+        else:
+            detected_W = 47
+        if W is None:
+            W = detected_W
+            print(f"[fewshot] auto-detected W={W} from first wav ({n_samples} samples)")
+        # Regenerate mel-spec from wav (overwrites any MFCC PNGs from the IDE)
+        if os.path.isdir(mfcc_dir):
+            shutil.rmtree(mfcc_dir)
+        print(f"[fewshot] regenerating mel-spec from {sound_dir}")
+        _rms.main.__globals__.update(NFILTERS=H, FFTLen=2048, MEL_M=_rms.mel(H, 2048, 44100))
+        # call regen main with argv injection
+        _saved_argv = sys.argv
+        sys.argv = ["regen_melspec.py", sound_dir, mfcc_dir]
+        _rms.main()
+        sys.argv = _saved_argv
+
+    if W is None:
+        W = 47
+    # Export to child processes (VoiceCNN + train_voice pipeline read these)
+    os.environ["KBMAI_VOICE_INPUT_H"] = str(H)
+    os.environ["KBMAI_VOICE_INPUT_W"] = str(W)
     print(f"[fewshot] labels={labels}  H={H}  W={W}")
 
-    data_dir = os.path.join(proj_dir, "dataset", "mfcc")
+    data_dir = mfcc_dir
     os.makedirs(os.path.join(proj_dir, "output"), exist_ok=True)
     split_dataset(data_dir, labels, proj["trainConfig"].get("train_split", 80))
 

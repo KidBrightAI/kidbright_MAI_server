@@ -31,18 +31,19 @@ class VoiceCNN(nn.Module):
         H = int(_os.environ.get("KBMAI_VOICE_INPUT_H", "40"))
         W = int(_os.environ.get("KBMAI_VOICE_INPUT_W", "47"))
         EMB = int(_os.environ.get("KBMAI_VOICE_EMB", "128"))
+        # Conv channel sizes, comma-separated. Smaller is faster on the CPU
+        # path but too small (e.g. 8,16,32) drops accuracy on small vocabs.
+        C = [int(c) for c in _os.environ.get("KBMAI_VOICE_CHANS", "32,64,128").split(",")]
+        assert len(C) == 3, "KBMAI_VOICE_CHANS must be 3 ints"
         # After 3 MaxPool2d(2) on (H, W): (H//8, W//8)
         h3 = max(1, H // 8)
         w3 = max(1, W // 8)
-        # Final pointwise conv lets us pick embedding width independent of the
-        # conv backbone — useful when AWNN chokes on large channel counts at
-        # the output tensor.
         self.features = nn.Sequential(
-            nn.Conv2d(3, 32, 3, padding=1), nn.ReLU(), nn.MaxPool2d(2),
-            nn.Conv2d(32, 64, 3, padding=1), nn.ReLU(), nn.MaxPool2d(2),
-            nn.Conv2d(64, 128, 3, padding=1), nn.ReLU(), nn.MaxPool2d(2),
+            nn.Conv2d(3, C[0], 3, padding=1), nn.ReLU(), nn.MaxPool2d(2),
+            nn.Conv2d(C[0], C[1], 3, padding=1), nn.ReLU(), nn.MaxPool2d(2),
+            nn.Conv2d(C[1], C[2], 3, padding=1), nn.ReLU(), nn.MaxPool2d(2),
             nn.MaxPool2d(kernel_size=(h3, w3)),
-            nn.Conv2d(128, EMB, 1), nn.ReLU(),
+            nn.Conv2d(C[2], EMB, 1), nn.ReLU(),
         )
         self.classifier = nn.Sequential(
             nn.Flatten(),

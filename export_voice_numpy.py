@@ -3,19 +3,23 @@
 on the V831 A7 CPU — bypass AWNN/spnntools entirely.
 
 Motivation: V831 AWNN per-tensor int8 quantization collapses small-vocab voice
-models no matter how we train/calibrate/preprocess. A7 Cortex can handle a
-4-layer conv net in float32 at 1-5 Hz via numpy, which is fast enough for
-keyword-spotting and guarantees parity with fp32 accuracy.
+models regardless of preprocessing / calibration / arch. The A7 Cortex can
+handle a DS-CNN in float32 via numpy in ~50-200 ms per clip (depending on
+duration + channel width), which is fast enough for keyword-spotting and
+guarantees parity with fp32 accuracy.
 
 Usage:
-    python export_voice_numpy.py --project-id voice_fs  # uses best_acc.pth
+    python export_voice_numpy.py --project-id voice_fs  # -> projects/voice_fs/output/model_cpu.npz
+
+Environment (must match what was used at training):
+    KBMAI_VOICE_INPUT_H / KBMAI_VOICE_INPUT_W / KBMAI_VOICE_EMB / KBMAI_VOICE_CHANS
 """
 from __future__ import annotations
 import argparse, json, os, sys
 import numpy as np
 import torch
 
-HERE = "/home/comdet/kidbright_MAI_server"
+HERE = os.path.dirname(os.path.abspath(__file__))
 os.chdir(HERE)
 sys.path.insert(0, HERE)
 from models.voice_cnn import VoiceCNN
