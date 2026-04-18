@@ -32,7 +32,7 @@ def train_voice_classification(project, path_to_save, project_dir,q,
         warm_up_epoch=6,
         input_shape = (3, 13, 147)
     ):
-    
+
     os.makedirs(path_to_save, exist_ok=True)
     
     # cuda
@@ -86,14 +86,20 @@ def train_voice_classification(project, path_to_save, project_dir,q,
         if len(os.listdir(os.path.join(data_dir, label))) == 0:
             os.rmdir(os.path.join(data_dir, label))
             
-    # Match V831 AWNN hardware range (see train_image_classification.py for rationale).
+    # Match V831 AWNN hardware range (see train_image_classification.py).
+    # Assumes the MFCC PNGs in the dataset were generated with full-range
+    # (min,max)->(0,255) scaling (the fixed voice_mfcc.py on the board). Older
+    # datasets saved with np.max() only lose the negative log-spectrum half and
+    # have to be regenerated from the WAVs in dataset/sound/ via tools/regen_mfcc.py.
     train_transforms = transforms.Compose([
         transforms.Resize(input_shape[1:]),  # resize MFCC to fixed (13, 147) regardless of duration
+        transforms.Grayscale(num_output_channels=3),  # MFCC is grayscale; replicate to 3ch for ImageFolder loader
         transforms.ToTensor(),
         transforms.Normalize([0.5, 0.5, 0.5], [128 / 255, 128 / 255, 128 / 255])
     ])
     test_transforms = transforms.Compose([
-        transforms.Resize(input_shape[1:]),  # resize MFCC to fixed (13, 147) regardless of duration
+        transforms.Resize(input_shape[1:]),
+        transforms.Grayscale(num_output_channels=3),
         transforms.ToTensor(),
         transforms.Normalize([0.5, 0.5, 0.5], [128 / 255, 128 / 255, 128 / 255])
     ])

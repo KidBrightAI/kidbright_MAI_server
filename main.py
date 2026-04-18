@@ -280,14 +280,51 @@ def convert_model(project_id, q):
         exported_path = yolo_model.export(format="onnx", imgsz=[224, 320]) #, opset=11)
         
         if exported_path and os.path.exists(exported_path):
-            import shutil
             shutil.move(exported_path, onnx_out)
         else:
             q.announce({"time":time.time(), "event": "error", "msg" : "YOLO ONNX export failed"})
             return
 
     board_id = project.get("currentBoard", {}).get("id", "")
-    images_path = os.path.join(project_path, "dataset", "JPEGImages") if modelType == "slim_yolo_v2" else os.path.join("data","test_images")
+    if modelType == "slim_yolo_v2":
+        images_path = os.path.join(project_path, "dataset", "JPEGImages")
+    elif modelType == "voice-cnn" or (modelType == "code" and project.get("projectType") == "VOICE_CLASSIFICATION"):
+        # Voice MFCC spectrograms have very different activation statistics from
+        # natural images, so calibrating against data/test_images (face photos)
+        # produces int8 thresholds that don't cover the real inference range and
+        # the quantized model collapses to a constant class. Build a mixed MFCC
+        # calibration set from the project's own training data.
+        mfcc_cal_dir = os.path.join(project_path, "output", "cal_mfcc")
+        if os.path.exists(mfcc_cal_dir):
+            shutil.rmtree(mfcc_cal_dir)
+        os.makedirs(mfcc_cal_dir, exist_ok=True)
+        mfcc_root = os.path.join(project_path, "dataset", "mfcc")
+        # training_task() moves samples into train/<label>/ before saving the pth;
+        # fall back to the flat <label>/ layout if we're converting without a retrain.
+        src_root = os.path.join(mfcc_root, "train")
+        if not os.path.isdir(src_root):
+            src_root = mfcc_root
+        # Pre-resize MFCC PNGs to (input_size[1], input_size[0]) = (W, H) so
+        # spnntools calibrates on the same tensor shape the network will see
+        # (grayscale replicated to 3 channels, matching training's Grayscale(3) +
+        # ImageFolder RGB loader).
+        from PIL import Image as _PImg
+        count = 0
+        for cls in sorted(os.listdir(src_root)):
+            cls_dir = os.path.join(src_root, cls)
+            if not os.path.isdir(cls_dir) or cls in ("train", "valid"):
+                continue
+            for fn in sorted(os.listdir(cls_dir))[:40]:
+                img = _PImg.open(os.path.join(cls_dir, fn)).convert("L")
+                img = img.resize((input_size[1], input_size[0]), _PImg.BILINEAR)
+                img = img.convert("RGB")
+                img.save(os.path.join(mfcc_cal_dir, f"{cls}_{fn}"))
+                count += 1
+        images_path = mfcc_cal_dir
+        q.announce({"time": time.time(), "event": "initial", "msg": f"voice calibration set: {count} MFCC images"})
+        print(f"[calibrate] voice uses {count} MFCC images from {src_root}")
+    else:
+        images_path = os.path.join("data", "test_images")
 
     if board_id == "kidbright-mai-plus" and (modelType.startswith("mobilenet") or modelType in ("resnet18", "voice-cnn")):
         q.announce({"time":time.time(), "event": "initial", "msg" : "Start converting onnx to cvimodel"})
@@ -428,7 +465,11 @@ def convert_model(project_id, q):
         # See train_image_classification.py for rationale.
         calib_mean = "127.5,127.5,127.5"
         calib_norm = "0.0078125,0.0078125,0.0078125"
-        cmd2 = "tools/spnntools calibrate -p=\""+output_model_optimize_param_path+"\" -b=\""+output_model_optimize_bin_path+"\" -i=\""+images_path+"\" -o=\""+output_model_calibrate_table+"\" --m=\""+calib_mean+"\" --n=\""+calib_norm+"\" --size=\""+str(input_size[0])+","+str(+input_size[1])+"\" -c -t=4"
+        # spnntools --size is W,H (width,height) but input_size in this file is (H,W)
+        # (matches torch.Tensor (C,H,W) convention used in torch_to_onnx). Pass W first
+        # so non-square inputs (voice 13x147, yolo11n 224x320) calibrate on correctly
+        # oriented images.
+        cmd2 = "tools/spnntools calibrate -p=\""+output_model_optimize_param_path+"\" -b=\""+output_model_optimize_bin_path+"\" -i=\""+images_path+"\" -o=\""+output_model_calibrate_table+"\" --m=\""+calib_mean+"\" --n=\""+calib_norm+"\" --size=\""+str(input_size[1])+","+str(input_size[0])+"\" -c -t=4"
         os.system(cmd2)
 
         output_model_quantize_bin_path = os.path.join(project_path, "output", "model_int8.bin")
