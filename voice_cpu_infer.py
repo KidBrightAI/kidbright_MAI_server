@@ -58,23 +58,29 @@ def maxpool_global(x, kh, kw):
 def relu(x): return np.maximum(x, 0)
 
 
-def preprocess(src, h_out=40, w_out=47):
-    """Load grayscale MFCC (path or numpy array), resize to (h_out, w_out),
-    replicate to 3ch, apply (x-127.5)/128 matching training Normalize."""
+def preprocess(src, h_out=None, w_out=None):
+    """Load grayscale MFCC (path or numpy array), optionally resize, replicate
+    to 3ch, and apply (x-127.5)/128 to match training's Normalize.
+
+    If h_out/w_out are None and src is a numpy array, keep the array's shape
+    (correct for the common case of feeding doMelSpec() output directly —
+    the training pipeline also saw its PNG at that same shape). PNG inputs
+    without explicit dims keep the PNG's existing (H, W); pass h_out/w_out
+    explicitly if you want to resize, e.g. to match a shorter/longer training.
+    """
     if isinstance(src, np.ndarray):
-        # accept raw mel-spec (H, W) or (3, H, W) already normalized; we
-        # expect pre-scaled min-max uint8 [0,255] here
-        if src.ndim == 2:
-            a = src.astype(np.float32)
-        elif src.ndim == 3 and src.shape[0] == 3:
-            return src.astype(np.float32)  # assume already done
-        else:
+        if src.ndim == 3 and src.shape[0] == 3:
+            return src.astype(np.float32)  # already (3,H,W) normalized
+        if src.ndim != 2:
             raise ValueError(f"unsupported array shape {src.shape}")
-        # resize numpy via PIL for consistency
-        img = Image.fromarray(a.astype(np.uint8)).resize((w_out, h_out), Image.BILINEAR)
-        a = np.array(img, dtype=np.float32)
+        a = src.astype(np.float32)
+        if h_out is not None and w_out is not None and a.shape != (h_out, w_out):
+            img = Image.fromarray(a.astype(np.uint8)).resize((w_out, h_out), Image.BILINEAR)
+            a = np.array(img, dtype=np.float32)
     else:
-        img = Image.open(src).convert("L").resize((w_out, h_out), Image.BILINEAR)
+        img = Image.open(src).convert("L")
+        if h_out is not None and w_out is not None:
+            img = img.resize((w_out, h_out), Image.BILINEAR)
         a = np.array(img, dtype=np.float32)
     a = np.stack([a, a, a], axis=0)
     return (a - 127.5) / 128.0

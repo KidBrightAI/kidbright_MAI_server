@@ -17,7 +17,7 @@ RATE = 44100
 CHUNK = 1024
 WIDTH = 2
 CHANNELS = 1
-RECORD_SEC = 1.0
+RECORD_SEC = float(os.environ.get("KBMAI_VOICE_RECORD_SEC", "1.0"))
 
 FrameDuration = 0.040
 FrameLen = int(FrameDuration * RATE)
