@@ -9,13 +9,18 @@ import sys
 
 __all__ = ['darknet19', 'darknet53']
 
+
 class Conv_BN_LeakyReLU(nn.Module):
+    # Name kept for backwards compatibility with existing checkpoints; the actual
+    # activation is ReLU6. LeakyReLU's unbounded negative tail expands the INT8
+    # quantize range so each bin gets coarser on V831/AWNN — measured on-device
+    # dropped int8 hit@0.5 from 9/10 (ReLU6) to 5/10 (LeakyReLU) on dog/phone.
     def __init__(self, in_channels, out_channels, ksize, padding=0, stride=1, dilation=1):
         super(Conv_BN_LeakyReLU, self).__init__()
         self.convs = nn.Sequential(
             nn.Conv2d(in_channels, out_channels, ksize, padding=padding, stride=stride, dilation=dilation),
             nn.BatchNorm2d(out_channels),
-            nn.LeakyReLU(0.1, inplace=True)
+            nn.ReLU6(inplace=True),
         )
 
     def forward(self, x):

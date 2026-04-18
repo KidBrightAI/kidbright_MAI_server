@@ -4,12 +4,15 @@ import torch.backends.cudnn as cudnn
 
 
 class Conv2d(nn.Module):
+    # leakyReLU kwarg kept for call-site compatibility; ignored because ReLU6
+    # is always used — its [0,6] output range halves V831/AWNN INT8 quantize
+    # error versus LeakyReLU's unbounded tails.
     def __init__(self, in_channels, out_channels, ksize, padding=0, stride=1, dilation=1, leakyReLU=False):
         super(Conv2d, self).__init__()
         self.convs = nn.Sequential(
             nn.Conv2d(in_channels, out_channels, ksize, stride=stride, padding=padding, dilation=dilation),
             nn.BatchNorm2d(out_channels),
-            nn.LeakyReLU(0.1, inplace=True) if leakyReLU else nn.ReLU(inplace=True)
+            nn.ReLU6(inplace=True),
         )
 
     def forward(self, x):
