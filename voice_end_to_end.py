@@ -59,11 +59,20 @@ def mel(nFilters, FFTLen, sampRate):
                 if int(x) < halfFFTLen: M[filt, int(x)] = y2 * (x - x3)
     return M
 
-MEL_M = mel(NFILTERS, FFTLen, RATE)
+_MEL_M_FULL = mel(NFILTERS, FFTLen, RATE)
+# MEL filterbank is a triangular bank over [lowFreq, highFreq] Hz, so only
+# bins inside that range contribute. Slice the mel matrix + the spectrum to
+# that range — ~2x faster matmul on V831 without changing the output.
+_nz = np.any(_MEL_M_FULL > 0, axis=0)
+_MEL_FIRST = int(np.argmax(_nz))
+_MEL_LAST = int(len(_nz) - np.argmax(_nz[::-1]))
+MEL_M = _MEL_M_FULL[:, _MEL_FIRST:_MEL_LAST]
+MEL_M_T = MEL_M.T.copy()  # contiguous for faster matmul
 
 def doMelSpec(signal):
-    """Vectorized log-mel-spectrogram. Batches all frames through np.fft.fft
-    in one call instead of per-frame looping.
+    """Vectorized log-mel-spectrogram.
+    - batched np.fft.rfft along axis=1 (half the cost of fft)
+    - truncate spectrum to the mel filterbank's non-zero bins only
     """
     lenSig = len(signal)
     nframes = int((lenSig - FrameLen) / FrameShift)
@@ -75,11 +84,11 @@ def doMelSpec(signal):
     frames = as_strided(s, shape=(nframes, FrameLen), strides=strides).copy()
     frames *= WIN
     frames[:, 1:] -= frames[:, :-1] * 0.95
-    spec = np.fft.fft(frames, FFTLen, axis=1)
-    mag_sq = np.abs(spec[:, :FFTLen // 2]) ** 2
+    spec = np.fft.rfft(frames, FFTLen, axis=1)         # (nframes, FFTLen/2+1)
+    mag_sq = np.abs(spec[:, _MEL_FIRST:_MEL_LAST]) ** 2
     mag_sq[mag_sq < 1e-50] = 1e-50
-    mel_power = mag_sq @ MEL_M.T
-    return np.log(mel_power).T
+    mel_power = mag_sq @ MEL_M_T                        # (nframes, NFILTERS)
+    return np.log(mel_power).T                          # (NFILTERS, nframes)
 
 
 def ts(label, t0):
@@ -111,24 +120,16 @@ def main():
     t_start = time.time()
     t_last = ts("START (mic opened, buffer warm)", t_start)
 
-    # ---- stage 1: record ----
-    wavefile = wave.open(WAV_PATH, 'wb')
-    wavefile.setnchannels(CHANNELS)
-    wavefile.setsampwidth(p.get_sample_size(pyaudio.paInt16))
-    wavefile.setframerate(RATE)
+    # ---- stage 1: record (keep audio in memory, skip WAV file round-trip) ----
     n_chunks = int(RATE / CHUNK * RECORD_SEC)
+    chunks = []
     for i in range(n_chunks):
-        data = stream.read(CHUNK, exception_on_overflow=False)
-        wavefile.writeframes(data)
-    wavefile.close()
+        chunks.append(stream.read(CHUNK, exception_on_overflow=False))
     stream.stop_stream(); stream.close(); p.terminate()
     t_last = ts(f"RECORD done ({n_chunks} chunks = {n_chunks*CHUNK/RATE:.3f}s audio)", t_start)
 
-    # ---- stage 2: load wav + compute mel-spec ----
-    wavefile = wave.open(WAV_PATH, 'rb')
-    signal = np.frombuffer(wavefile.readframes(-1), dtype=np.int16).astype(np.float64)
-    wavefile.close()
-    t_last = ts(f"WAV loaded ({len(signal)} samples)", t_start)
+    signal = np.frombuffer(b"".join(chunks), dtype=np.int16).astype(np.float64)
+    t_last = ts(f"BUFFER decoded ({len(signal)} samples)", t_start)
 
     mel_spec = doMelSpec(signal)
     t_last = ts(f"MEL-SPEC computed (shape={mel_spec.shape})", t_start)
