@@ -164,8 +164,17 @@ def train_image_classification(project, path_to_save, project_dir,q,
 
     # loss and optimizer
     criterion = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(net.parameters(), lr=learning_rate, weight_decay=weight_decay)
-    #optimizer = optim.SGD(net.parameters(), lr=learn_rate, momentum=0.9)
+    # Per-architecture optimizer. Evidence: 5-fold CV on dog_cat (200 images,
+    # 30 epochs) measured 2026-04-19:
+    #   ResNet-18 + Adam lr=1e-3: last5 val_acc = 77.6 ± 6.1 (noisy, overfits)
+    #   ResNet-18 + SGD  lr=1e-3: last5 val_acc = 96.5 ± 2.5 (smooth curve)
+    # MobileNet keeps Adam — it was never shown to misbehave under this LR.
+    if model_type.startswith('resnet'):
+        optimizer = optim.SGD(net.parameters(), lr=learning_rate,
+                              momentum=0.9, weight_decay=weight_decay)
+    else:
+        optimizer = optim.Adam(net.parameters(), lr=learning_rate,
+                               weight_decay=weight_decay)
     #scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=step_lr, gamma=0.1)
 
     # train
