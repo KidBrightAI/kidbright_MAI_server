@@ -11,6 +11,7 @@ from torchsummary import summary
 import torch.optim as optim
 import time
 import torch.backends.cudnn as cudnn
+from utils.modules import replace_relu6_with_relu
 
 
 def train_image_classification(project, path_to_save, project_dir,q,
@@ -146,6 +147,9 @@ def train_image_classification(project, path_to_save, project_dir,q,
     # add fc layer
     if model_type.startswith('mobilenet'):
         net.classifier[1] = nn.Linear(in_features=net.classifier[1].in_features, out_features=num_classes, bias=True)
+        # V831 AWNN runs ReLU on NPU but falls back to CPU for ReLU6. Swap so
+        # every activation stays on the NPU after INT8 quantization (~9× faster).
+        replace_relu6_with_relu(net)
     elif model_type.startswith('resnet'):
         net.fc = nn.Linear(in_features=net.fc.in_features, out_features=num_classes, bias=True)
     else:

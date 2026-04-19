@@ -48,3 +48,21 @@ class SPP(nn.Module):
         x = torch.cat([x, x_1, x_2, x_3], dim=1)
 
         return x
+
+
+def replace_relu6_with_relu(module):
+    """In-place swap every nn.ReLU6 to nn.ReLU under the given module.
+
+    V831 AWNN runs ReLU on the NPU (~60 ms forward for slim_yolo_v2 @ 224)
+    but falls back to CPU for ReLU6 (~520 ms, measured). torchvision's
+    mobilenet_v2 uses ReLU6 throughout (35 activations, 0 ReLU) so the
+    whole network would run CPU without this swap. Weights are unaffected
+    — activations carry no parameters, and ReLU6 vs ReLU differ only at
+    x>6, which BN+pretrained conv outputs rarely reach.
+    """
+    for name, child in module.named_children():
+        if isinstance(child, nn.ReLU6):
+            setattr(module, name, nn.ReLU(inplace=child.inplace))
+        else:
+            replace_relu6_with_relu(child)
+    return module

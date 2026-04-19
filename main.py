@@ -33,6 +33,7 @@ import torch
 import torch.nn as nn
 import torch.backends.cudnn as cudnn
 from data import *
+from utils.modules import replace_relu6_with_relu
 
 app = Flask(__name__)
 
@@ -208,7 +209,10 @@ def convert_model(project_id, q):
         model_label.sort()
         from torchvision.models import mobilenet_v2
         net = mobilenet_v2(pretrained=False)
-        net.classifier[1] = nn.Linear(net.classifier[1].in_features, num_classes)        
+        net.classifier[1] = nn.Linear(net.classifier[1].in_features, num_classes)
+        # Must match the ReLU6→ReLU swap applied during training, otherwise the
+        # state_dict layer names still match but ONNX export emits ReLU6 ops.
+        replace_relu6_with_relu(net)
         net.load_state_dict(torch.load(best_file, map_location=device))
         net.to(device).eval()
 
