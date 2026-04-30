@@ -406,7 +406,19 @@ def convert_model(project_id, q):
         cali_table_out = os.path.join(project_path, "output", f"{modelType}_cali_table")
         cvimodel_out = os.path.join(project_path, "output", "model.cvimodel")
 
-        test_img_transform = os.path.join("data", "test_images2", "cat.jpg")
+        # Use the project's own training images for both the model_transform
+        # reference shot and the calibration set. cat.jpg + 24 generic
+        # test_images previously caused INT8 deploy to fail tolerance check
+        # (Sigmoid output similarity 0.40 < 0.5 threshold) for custom models
+        # whose class outputs differ from COCO defaults.
+        project_images_dir = os.path.join(project_path, "dataset", "JPEGImages")
+        if os.path.isdir(project_images_dir) and os.listdir(project_images_dir):
+            first_img = sorted(os.listdir(project_images_dir))[0]
+            test_img_transform = os.path.join(project_images_dir, first_img)
+            cal_dataset_path = project_images_dir
+        else:
+            test_img_transform = os.path.join("data", "test_images2", "cat.jpg")
+            cal_dataset_path = os.path.join("data", "test_images")
 
         output_names = "/model.23/dfl/conv/Conv_output_0,/model.23/Sigmoid_output_0"
 
@@ -430,13 +442,15 @@ def convert_model(project_id, q):
         ]
         cmd1 = " ".join(cmd1_list)
 
-        dataset_path_cali = os.path.join("data", "test_images")
+        # Cap input_num at the actual dataset size — run_calibration.py errors
+        # out if we ask for more images than exist.
+        cal_input_num = min(24, len(os.listdir(cal_dataset_path)))
 
         cmd2_list = [
             f"conda run -n kbmai run_calibration.py",
             f"{mlir_out}",
-            f"--dataset {dataset_path_cali}",
-            f"--input_num 24",
+            f"--dataset {cal_dataset_path}",
+            f"--input_num {cal_input_num}",
             f"-o {cali_table_out}"
         ]
         cmd2 = " ".join(cmd2_list)
@@ -454,12 +468,20 @@ def convert_model(project_id, q):
         ]
         cmd3 = " ".join(cmd3_list)
 
-        print("Running CMD1:", cmd1)
-        os.system(cmd1)
-        print("Running CMD2:", cmd2)
-        os.system(cmd2)
-        print("Running CMD3:", cmd3)
-        os.system(cmd3)
+        # Run each tpu-mlir step and surface failures. os.system swallowed
+        # exit codes so when tpu-mlir wasn't installed (or tolerance failed
+        # on a custom model), the only message users saw was the generic
+        # "Failed to generate cvimodel" — no way to debug.
+        for step_name, cmd in (("CMD1 model_transform", cmd1),
+                               ("CMD2 run_calibration", cmd2),
+                               ("CMD3 model_deploy", cmd3)):
+            print(f"Running {step_name}:", cmd, flush=True)
+            rc = os.system(cmd)
+            if rc != 0:
+                msg = f"{step_name} failed (exit {rc>>8 if rc>=256 else rc}). See server log for details."
+                print(msg)
+                q.announce({"time":time.time(), "event": "error", "msg": msg})
+                break
 
         if os.path.exists(cvimodel_out):
             mud_out = os.path.join(project_path, "output", "model.mud")
