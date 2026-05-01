@@ -227,8 +227,34 @@ def convert_model(project_id, q):
         net.to(device).eval()
 
     elif modelType == "voice-cnn":
+        # Auto-detect input W from the first wav (mirrors training_task) so convert
+        # can run as a separate process without inheriting env from the train run.
+        # Without this, VoiceCNN's class-level KBMAI_VOICE_INPUT_W default (47)
+        # clashes with .pth weights trained at the auto-detected W (often 147),
+        # producing a MaxPool kernel mismatch when the classifier head sees
+        # (B, C*1*W//8) instead of (B, C*1*1).
+        sound_dir = os.path.join(project_path, "dataset", "sound")
+        detected_W = None
+        if os.path.isdir(sound_dir):
+            import wave as _wv
+            for cls in sorted(os.listdir(sound_dir)):
+                cdir = os.path.join(sound_dir, cls)
+                if not os.path.isdir(cdir):
+                    continue
+                wavs = [f for f in sorted(os.listdir(cdir)) if f.endswith(".wav")]
+                if not wavs:
+                    continue
+                with _wv.open(os.path.join(cdir, wavs[0]), "rb") as _wf:
+                    _nsamples = _wf.getnframes()
+                FL = int(0.040 * 44100); FS = int(0.040 * 44100 / 2)
+                detected_W = int((_nsamples - FL) / FS)
+                break
         _H = int(os.environ.get("KBMAI_VOICE_INPUT_H", "40"))
-        _W = int(os.environ.get("KBMAI_VOICE_INPUT_W", "147"))
+        _W = int(os.environ.get("KBMAI_VOICE_INPUT_W", str(detected_W) if detected_W else "147"))
+        # Mirror chosen H/W into env so VoiceCNN's class init reads matching
+        # values instead of its own defaults (40, 47).
+        os.environ["KBMAI_VOICE_INPUT_H"] = str(_H)
+        os.environ["KBMAI_VOICE_INPUT_W"] = str(_W)
         input_size = [_H, _W]
         model_label = [ l["label"] for l in project["labels"]]
         model_label.sort()
@@ -367,13 +393,32 @@ def convert_model(project_id, q):
         npz_out = os.path.join(project_path, "output", "mobilenet_top_outputs.npz")
         cali_table_out = os.path.join(project_path, "output", "mobilenet_cali_table")
         cvimodel_out = os.path.join(project_path, "output", "model.cvimodel")
-        
-        test_img = os.path.join("data", "test_images2", "cat.jpg")
 
-        cmd1 = f"conda run -n kbmai model_transform.py --model_name mobilenet --model_def {onnx_out} --input_shapes [[1,3,{input_size[0]},{input_size[1]}]] --mean 123.675,116.28,103.53 --scale 0.0171,0.0175,0.0174 --keep_aspect_ratio --pixel_format rgb --channel_format nchw --test_input {test_img} --test_result {npz_out} --tolerance 0.99,0.99 --mlir {mlir_out}"
+        # Preprocessing baked into the cvimodel must match what the trainer
+        # used during training_task; otherwise the .pth weights see a shifted
+        # input distribution at inference and quantization picks up the wrong
+        # activation ranges. mobilenet/resnet18 use ImageNet normalization
+        # (matches torchvision's pretrained weights), but voice-cnn uses
+        # Normalize([.5,.5,.5], [128/255,...]) → mean=127.5, scale=1/128.
+        if modelType == "voice-cnn":
+            calib_mean = "127.5,127.5,127.5"
+            calib_scale = "0.0078125,0.0078125,0.0078125"
+            mud_mean = "127.5, 127.5, 127.5"
+            mud_scale = "0.0078125, 0.0078125, 0.0078125"
+            test_img = os.path.join(images_path, sorted(os.listdir(images_path))[0]) \
+                if os.path.isdir(images_path) and os.listdir(images_path) \
+                else os.path.join("data", "test_images2", "cat.jpg")
+        else:
+            calib_mean = "123.675,116.28,103.53"
+            calib_scale = "0.0171,0.0175,0.0174"
+            mud_mean = "123.675, 116.28, 103.53"
+            mud_scale = "0.017124753831663668, 0.01750700280112045, 0.017429193899782137"
+            test_img = os.path.join("data", "test_images2", "cat.jpg")
+
+        cmd1 = f"conda run -n kbmai model_transform.py --model_name mobilenet --model_def {onnx_out} --input_shapes [[1,3,{input_size[0]},{input_size[1]}]] --mean {calib_mean} --scale {calib_scale} --keep_aspect_ratio --pixel_format rgb --channel_format nchw --test_input {test_img} --test_result {npz_out} --tolerance 0.99,0.99 --mlir {mlir_out}"
         cmd2 = f"conda run -n kbmai run_calibration.py {mlir_out} --dataset {images_path} --input_num 24 --processor cv181x -o {cali_table_out}"
         cmd3 = f"conda run -n kbmai model_deploy.py --mlir {mlir_out} --quantize INT8 --quant_input --calibration_table {cali_table_out} --chip cv181x --processor cv181x --test_input {npz_out} --test_reference {npz_out} --tolerance 0.9,0.6 --model {cvimodel_out}"
-        
+
         os.system(cmd1)
         os.system(cmd2)
         os.system(cmd3)
@@ -388,8 +433,8 @@ def convert_model(project_id, q):
                 "[extra]\n"
                 "model_type = classifier\n"
                 "input_type = rgb\n"
-                "mean = 123.675, 116.28, 103.53\n"
-                "scale = 0.017124753831663668, 0.01750700280112045, 0.017429193899782137\n"
+                f"mean = {mud_mean}\n"
+                f"scale = {mud_scale}\n"
                 f"labels = {labels_str}\n"
             )
             with open(mud_out, "w") as f:
