@@ -153,6 +153,44 @@ def after_request(response):
 def send_report(path):
     return send_from_directory('projects', path)
 
+
+def _yolo11_pad_sigmoid_output(onnx_path):
+    """Append a zero channel to the YOLO11 head's Sigmoid output.
+
+    MaixCAM's on-board nn.YOLO11 C++ wrapper picks DFL vs Sigmoid
+    tensors by a shape heuristic that collides when num_classes == 4
+    (Sigmoid C of 4 looks like DFL's bbox H of 4). Adding a padding
+    channel via Concat changes Sigmoid's C to 5, breaking the
+    ambiguity. The injected channel is all-zeros so it never wins
+    NMS; downstream detector_runtime hides the matching "__pad__"
+    label from user code.
+
+    Mutates `onnx_path` in place. Caller is responsible for cutting
+    the cvimodel at `/model.23/Sigmoid_padded` rather than the raw
+    `/model.23/Sigmoid_output_0`.
+    """
+    import onnx
+    import numpy as np
+    from onnx import helper, numpy_helper
+
+    model = onnx.load(onnx_path)
+    g = model.graph
+    g.initializer.append(
+        numpy_helper.from_array(
+            np.zeros((1, 1, 1470), dtype=np.float32),
+            name="/pad/zero_channel",
+        )
+    )
+    g.node.append(helper.make_node(
+        "Concat",
+        inputs=["/model.23/Sigmoid_output_0", "/pad/zero_channel"],
+        outputs=["/model.23/Sigmoid_padded"],
+        axis=1,
+        name="/pad/Concat",
+    ))
+    onnx.save(model, onnx_path)
+
+
 def convert_model(project_id, q):
     global STAGE
 
@@ -325,17 +363,40 @@ def convert_model(project_id, q):
         from ultralytics import YOLO
         yolo_model = YOLO(best_file)
         q.announce({"time":time.time(), "event": "initial", "msg" : "Start converting YOLO model to onnx"})
-        
+
         onnx_out = os.path.join(project_path, "output", "model.onnx")
-        
+
         # YOLO export returns the exported onnx object path
         exported_path = yolo_model.export(format="onnx", imgsz=[224, 320]) #, opset=11)
-        
+
         if exported_path and os.path.exists(exported_path):
             shutil.move(exported_path, onnx_out)
         else:
             q.announce({"time":time.time(), "event": "error", "msg" : "YOLO ONNX export failed"})
             return
+
+    # ---- YOLO11 num_classes==4 workaround --------------------------------
+    # MaixCAM's on-board nn.YOLO11 C++ wrapper picks DFL vs Sigmoid output
+    # by shape heuristic that confuses Sigmoid's class channel C with
+    # DFL's bbox H=4 when N happens to equal 4. The decoder then reads
+    # the wrong tensor on the second forward (dual_buff swap) and
+    # raises `tensor idx error -404232217`.
+    #
+    # Verified bug on a fresh-trained 4-class model; 3-, 5-, and 80-class
+    # models all run cleanly. Workaround: append one all-zero channel to
+    # the Sigmoid output via an ONNX Concat so cvimodel's sigmoid C
+    # becomes 5 instead of 4. The dummy class label "__pad__" goes into
+    # the .mud so the on-board wrapper's label count matches; the
+    # detector_runtime helper drops detections whose label starts with
+    # "__" so user code never sees the padded class.
+    yolo11_pad_sigmoid = (
+        modelType in ("yolo11n", "yolo11s") and num_classes == 4
+        and os.environ.get("KBMAI_YOLO11_PAD_OFF") != "1"
+    )
+    if yolo11_pad_sigmoid:
+        _yolo11_pad_sigmoid_output(onnx_out)
+        q.announce({"time": time.time(), "event": "initial",
+                    "msg": "Padded YOLO11 sigmoid output (workaround for MaixCAM N==4 bug)"})
 
     board_id = project.get("currentBoard", {}).get("id", "")
     if modelType == "slim_yolo_v2":
@@ -465,7 +526,13 @@ def convert_model(project_id, q):
             test_img_transform = os.path.join("data", "test_images2", "cat.jpg")
             cal_dataset_path = os.path.join("data", "test_images")
 
-        output_names = "/model.23/dfl/conv/Conv_output_0,/model.23/Sigmoid_output_0"
+        # When the N==4 workaround is active, cut at the Concat we
+        # injected (Sigmoid + zero channel) instead of the raw Sigmoid.
+        sigmoid_out_node = (
+            "/model.23/Sigmoid_padded" if yolo11_pad_sigmoid
+            else "/model.23/Sigmoid_output_0"
+        )
+        output_names = f"/model.23/dfl/conv/Conv_output_0,{sigmoid_out_node}"
 
         deploy_tolerance = {"yolo11n": "0.9,0.6", "yolo11s": "0.85,0.5"}[modelType]
 
@@ -530,7 +597,15 @@ def convert_model(project_id, q):
 
         if os.path.exists(cvimodel_out):
             mud_out = os.path.join(project_path, "output", "model.mud")
-            labels_str = ", ".join(model_label)
+            # When the N==4 workaround padded sigmoid to C=5, the on-board
+            # nn.YOLO11 wrapper expects 5 labels in the .mud to match the
+            # tensor channel count. detector_runtime.py drops any
+            # detection whose label starts with "__" so user code never
+            # sees the placeholder.
+            mud_labels = list(model_label)
+            if yolo11_pad_sigmoid:
+                mud_labels.append("__pad__")
+            labels_str = ", ".join(mud_labels)
             mud_content = (
                 "[basic]\n"
                 "type = cvimodel\n"

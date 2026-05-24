@@ -398,6 +398,14 @@ MUD file:
   labels = {sorted labels}
 ```
 
+#### YOLO11 N==4 sigmoid-pad workaround
+
+When `num_classes == 4`, MaixCAM's on-board `nn.YOLO11.detect()` C++ wrapper raises `Invalid arguments: Tensors get tensor idx error` (`-404232217`) on the second forward call. Verified reproducible across multiple datasets with N=4; N=2/3/5/80 work fine. Suspected root cause: the wrapper's shape heuristic for distinguishing DFL (`[1, 1, 4, 1470]`) from Sigmoid (`[1, N, 1470, 1]`) collides when N equals DFL's bbox dimension (4).
+
+`_yolo11_pad_sigmoid_output()` injects an all-zero channel after `/model.23/Sigmoid_output_0` via ONNX `Concat`, producing `[1, 5, 1470]`. The cvimodel is cut at the new `/model.23/Sigmoid_padded` node and the `.mud` appends a `__pad__` label so the on-board wrapper sees a consistent 5-class model. The IDE-side `detector_runtime.py` filters detections with `class_id >= len(user_labels)` so the placeholder never surfaces.
+
+The branch is guarded by `os.environ.get("KBMAI_YOLO11_PAD_OFF") != "1"` — set the env var to disable the pad and verify whether a future MaixCAM fix actually resolves the underlying bug. Tracked in IDE repo's `TODO.md`.
+
 ### NCNN Conversion (else branch — kidbright-mai default)
 
 ```
