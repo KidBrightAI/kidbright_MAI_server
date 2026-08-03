@@ -52,7 +52,11 @@ def doMelSpec(signal):
     nframes = int((lenSig - FrameLen) / FrameShift)
     out = np.zeros((NFILTERS, nframes))
     minPow = 1e-50
-    for fr in range(nframes - 1):
+    # Every frame must be filled. A short loop leaves the last column at zero,
+    # which the per-clip min/max rescale below then treats as the floor — the
+    # whole image ends up on a different scale than the one voice_runtime.py
+    # produces on the board, and the model sees inputs it never trained on.
+    for fr in range(nframes):
         start = fr*FrameShift
         cur = signal[start:start+FrameLen] * WIN
         cur[1:] -= cur[:-1] * 0.95
