@@ -216,6 +216,10 @@ def convert_model(project_id, q):
                 best_file = alt_best_file
 
     if best_file == None or not os.path.exists(best_file):
+        # No checkpoint means training never succeeded, so don't claim 3 (trained).
+        # Use 0 (none): it's absent from the IDE's stageFlags map, so /ping won't
+        # assert a false trained/converting state — and it clears STAGE=4 either way.
+        STAGE = 0
         return q.announce({"time":time.time(), "event": "error", "msg" : "No best_map.pth file"})
     
     device = torch.device("cpu")
@@ -373,6 +377,7 @@ def convert_model(project_id, q):
             shutil.move(exported_path, onnx_out)
         else:
             q.announce({"time":time.time(), "event": "error", "msg" : "YOLO ONNX export failed"})
+            STAGE = 3  # trained; convert failed — reset from 4 so /ping re-enables the button
             return
 
     # ---- YOLO11 num_classes==4 workaround --------------------------------
@@ -458,31 +463,47 @@ def convert_model(project_id, q):
         # Preprocessing baked into the cvimodel must match what the trainer
         # used during training_task; otherwise the .pth weights see a shifted
         # input distribution at inference and quantization picks up the wrong
-        # activation ranges. mobilenet/resnet18 use ImageNet normalization
-        # (matches torchvision's pretrained weights), but voice-cnn uses
-        # Normalize([.5,.5,.5], [128/255,...]) → mean=127.5, scale=1/128.
+        # activation ranges. Every modelType on this cv181x path trains with
+        # (x-127.5)/128 — Normalize([.5]*3, [128/255]*3) in both
+        # train_image_classification.py:102/108 and
+        # train_voice_classification.py:107/113 → mean=127.5, scale=1/128=0.0078125.
+        # (The image trainer moved off ImageNet stats because V831's AWNN clips
+        # inputs outside ~[-1,+1]; see train_image_classification.py:88-95. That
+        # is why the old "ImageNet normalization" comment here looked plausible.)
+        # Baking ImageNet stats instead fed the board a ~2.2x wider distribution
+        # than training: measured 94.17% vs 98.33% on a 120-image set, with INT8
+        # quantization itself costing 0 pp. Do NOT "restore" ImageNet stats.
+        calib_mean = "127.5,127.5,127.5"
+        calib_scale = "0.0078125,0.0078125,0.0078125"
+        mud_mean = "127.5, 127.5, 127.5"
+        mud_scale = "0.0078125, 0.0078125, 0.0078125"
         if modelType == "voice-cnn":
-            calib_mean = "127.5,127.5,127.5"
-            calib_scale = "0.0078125,0.0078125,0.0078125"
-            mud_mean = "127.5, 127.5, 127.5"
-            mud_scale = "0.0078125, 0.0078125, 0.0078125"
+            # voice calibrates on the MFCC images under images_path; fall back to
+            # the generic shot only when that set is empty.
             test_img = os.path.join(images_path, sorted(os.listdir(images_path))[0]) \
                 if os.path.isdir(images_path) and os.listdir(images_path) \
                 else os.path.join("data", "test_images2", "cat.jpg")
         else:
-            calib_mean = "123.675,116.28,103.53"
-            calib_scale = "0.0171,0.0175,0.0174"
-            mud_mean = "123.675, 116.28, 103.53"
-            mud_scale = "0.017124753831663668, 0.01750700280112045, 0.017429193899782137"
             test_img = os.path.join("data", "test_images2", "cat.jpg")
 
         cmd1 = f"conda run -n kbmai model_transform.py --model_name mobilenet --model_def {onnx_out} --input_shapes [[1,3,{input_size[0]},{input_size[1]}]] --mean {calib_mean} --scale {calib_scale} --keep_aspect_ratio --pixel_format rgb --channel_format nchw --test_input {test_img} --test_result {npz_out} --tolerance 0.99,0.99 --mlir {mlir_out}"
         cmd2 = f"conda run -n kbmai run_calibration.py {mlir_out} --dataset {images_path} --input_num 24 --processor cv181x -o {cali_table_out}"
         cmd3 = f"conda run -n kbmai model_deploy.py --mlir {mlir_out} --quantize INT8 --quant_input --calibration_table {cali_table_out} --chip cv181x --processor cv181x --test_input {npz_out} --test_reference {npz_out} --tolerance 0.9,0.6 --model {cvimodel_out}"
 
-        os.system(cmd1)
-        os.system(cmd2)
-        os.system(cmd3)
+        # Run each tpu-mlir step and surface which one failed. Bare os.system
+        # swallowed the exit code, so a failed transform/calibrate/deploy still
+        # fell through to STAGE=5 and reported "Model converted successfully"
+        # with no cvimodel to download. Same pattern as the yolo11 branch below.
+        for step_name, cmd in (("CMD1 model_transform", cmd1),
+                               ("CMD2 run_calibration", cmd2),
+                               ("CMD3 model_deploy", cmd3)):
+            print(f"Running {step_name}:", cmd, flush=True)
+            rc = os.system(cmd)
+            if rc != 0:
+                msg = f"{step_name} failed (exit {rc>>8 if rc>=256 else rc}). See server log for details."
+                print(msg)
+                q.announce({"time":time.time(), "event": "error", "msg": msg})
+                break
 
         if os.path.exists(cvimodel_out):
             mud_out = os.path.join(project_path, "output", "model.mud")
@@ -503,6 +524,8 @@ def convert_model(project_id, q):
             q.announce({"time":time.time(), "event": "initial", "msg" : "Created model.mud"})
         else:
             q.announce({"time":time.time(), "event": "error", "msg" : "Failed to generate cvimodel"})
+            STAGE = 3  # trained; convert failed — reset from 4 so /ping re-enables the button
+            return
 
     elif board_id == "kidbright-mai-plus" and modelType in ("yolo11n", "yolo11s"):
         q.announce({"time":time.time(), "event": "initial", "msg" : f"Start converting ONNX to cvimodel for {modelType}"})
@@ -622,6 +645,8 @@ def convert_model(project_id, q):
             q.announce({"time":time.time(), "event": "initial", "msg" : "Created model.mud"})
         else:
             q.announce({"time":time.time(), "event": "error", "msg" : "Failed to generate cvimodel"})
+            STAGE = 3  # trained; convert failed — reset from 4 so /ping re-enables the button
+            return
 
     else:
         with torch.no_grad():
@@ -654,6 +679,16 @@ def convert_model(project_id, q):
         q.announce({"time":time.time(), "event": "initial", "msg" : "Start quantizing model"})
         cmd3 = "tools/spnntools quantize "+output_model_optimize_param_path+" "+output_model_optimize_bin_path+" "+output_model_quantize_param_path+" "+output_model_quantize_bin_path+" "+output_model_calibrate_table
         os.system(cmd3)
+
+        # Guard the shared success announcement on the quantized artifact, the
+        # same way the cvimodel branches check their output — otherwise a failed
+        # spnntools step still fell through to STAGE=5 and reported success with
+        # no model_int8.* to download.
+        if not (os.path.exists(output_model_quantize_param_path)
+                and os.path.exists(output_model_quantize_bin_path)):
+            q.announce({"time":time.time(), "event": "error", "msg" : "Failed to generate model_int8"})
+            STAGE = 3  # trained; convert failed — reset from 4 so /ping re-enables the button
+            return
         
     STAGE = 5
     q.announce({"time":time.time(), "event": "convert_model_end", "msg" : "Model converted successfully"})
