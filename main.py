@@ -216,6 +216,10 @@ def convert_model(project_id, q):
                 best_file = alt_best_file
 
     if best_file == None or not os.path.exists(best_file):
+        # No checkpoint means training never succeeded, so don't claim 3 (trained).
+        # Use 0 (none): it's absent from the IDE's stageFlags map, so /ping won't
+        # assert a false trained/converting state — and it clears STAGE=4 either way.
+        STAGE = 0
         return q.announce({"time":time.time(), "event": "error", "msg" : "No best_map.pth file"})
     
     device = torch.device("cpu")
@@ -373,6 +377,7 @@ def convert_model(project_id, q):
             shutil.move(exported_path, onnx_out)
         else:
             q.announce({"time":time.time(), "event": "error", "msg" : "YOLO ONNX export failed"})
+            STAGE = 3  # trained; convert failed — reset from 4 so /ping re-enables the button
             return
 
     # ---- YOLO11 num_classes==4 workaround --------------------------------
@@ -519,6 +524,7 @@ def convert_model(project_id, q):
             q.announce({"time":time.time(), "event": "initial", "msg" : "Created model.mud"})
         else:
             q.announce({"time":time.time(), "event": "error", "msg" : "Failed to generate cvimodel"})
+            STAGE = 3  # trained; convert failed — reset from 4 so /ping re-enables the button
             return
 
     elif board_id == "kidbright-mai-plus" and modelType in ("yolo11n", "yolo11s"):
@@ -639,6 +645,7 @@ def convert_model(project_id, q):
             q.announce({"time":time.time(), "event": "initial", "msg" : "Created model.mud"})
         else:
             q.announce({"time":time.time(), "event": "error", "msg" : "Failed to generate cvimodel"})
+            STAGE = 3  # trained; convert failed — reset from 4 so /ping re-enables the button
             return
 
     else:
@@ -680,6 +687,7 @@ def convert_model(project_id, q):
         if not (os.path.exists(output_model_quantize_param_path)
                 and os.path.exists(output_model_quantize_bin_path)):
             q.announce({"time":time.time(), "event": "error", "msg" : "Failed to generate model_int8"})
+            STAGE = 3  # trained; convert failed — reset from 4 so /ping re-enables the button
             return
         
     STAGE = 5
