@@ -458,22 +458,27 @@ def convert_model(project_id, q):
         # Preprocessing baked into the cvimodel must match what the trainer
         # used during training_task; otherwise the .pth weights see a shifted
         # input distribution at inference and quantization picks up the wrong
-        # activation ranges. mobilenet/resnet18 use ImageNet normalization
-        # (matches torchvision's pretrained weights), but voice-cnn uses
-        # Normalize([.5,.5,.5], [128/255,...]) → mean=127.5, scale=1/128.
+        # activation ranges. Every modelType on this cv181x path trains with
+        # (x-127.5)/128 — Normalize([.5]*3, [128/255]*3) in both
+        # train_image_classification.py:102/108 and
+        # train_voice_classification.py:107/113 → mean=127.5, scale=1/128=0.0078125.
+        # (The image trainer moved off ImageNet stats because V831's AWNN clips
+        # inputs outside ~[-1,+1]; see train_image_classification.py:88-95. That
+        # is why the old "ImageNet normalization" comment here looked plausible.)
+        # Baking ImageNet stats instead fed the board a ~2.2x wider distribution
+        # than training: measured 94.17% vs 98.33% on a 120-image set, with INT8
+        # quantization itself costing 0 pp. Do NOT "restore" ImageNet stats.
+        calib_mean = "127.5,127.5,127.5"
+        calib_scale = "0.0078125,0.0078125,0.0078125"
+        mud_mean = "127.5, 127.5, 127.5"
+        mud_scale = "0.0078125, 0.0078125, 0.0078125"
         if modelType == "voice-cnn":
-            calib_mean = "127.5,127.5,127.5"
-            calib_scale = "0.0078125,0.0078125,0.0078125"
-            mud_mean = "127.5, 127.5, 127.5"
-            mud_scale = "0.0078125, 0.0078125, 0.0078125"
+            # voice calibrates on the MFCC images under images_path; fall back to
+            # the generic shot only when that set is empty.
             test_img = os.path.join(images_path, sorted(os.listdir(images_path))[0]) \
                 if os.path.isdir(images_path) and os.listdir(images_path) \
                 else os.path.join("data", "test_images2", "cat.jpg")
         else:
-            calib_mean = "123.675,116.28,103.53"
-            calib_scale = "0.0171,0.0175,0.0174"
-            mud_mean = "123.675, 116.28, 103.53"
-            mud_scale = "0.017124753831663668, 0.01750700280112045, 0.017429193899782137"
             test_img = os.path.join("data", "test_images2", "cat.jpg")
 
         cmd1 = f"conda run -n kbmai model_transform.py --model_name mobilenet --model_def {onnx_out} --input_shapes [[1,3,{input_size[0]},{input_size[1]}]] --mean {calib_mean} --scale {calib_scale} --keep_aspect_ratio --pixel_format rgb --channel_format nchw --test_input {test_img} --test_result {npz_out} --tolerance 0.99,0.99 --mlir {mlir_out}"
