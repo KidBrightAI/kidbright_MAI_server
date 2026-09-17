@@ -37,6 +37,51 @@ from utils.modules import replace_relu6_with_relu
 
 app = Flask(__name__)
 
+
+def _pin_pip_for_ultralytics_autoupdate():
+    """Stop Ultralytics AutoUpdate from moving numpy/protobuf out from under tpu-mlir.
+
+    Ultralytics pip-installs its own missing export dependencies mid-run, with no
+    version constraint. Exporting yolo11 to ONNX therefore pulled onnxslim and
+    dragged numpy from 1.24.3 to 2.2.6, which breaks tpu_mlir (pins numpy==1.24.3)
+    and cv2: CMD1 model_transform then dies with "ImportError:
+    numpy.core.multiarray failed to import" even though the ONNX exported fine.
+    Measured on ultralytics 8.4.155 with onnxslim absent:
+
+      AutoUpdate on, no constraint    -> "Successfully installed ... numpy-2.2.6"
+      AutoUpdate on, PIP_CONSTRAINT   -> onnxslim 0.1.96 installs, numpy stays 1.24.3
+      YOLO_AUTOINSTALL=false          -> nothing installed, export still succeeds
+
+    Constrain rather than disable. The export does run without onnxslim, but the
+    unsimplified graph differs (10,563,362 B vs 10,602,679 B) and the yolo11 branch
+    cuts the model at fixed node names, so keep onnxslim in the loop and only stop
+    the environment from shifting underneath it.
+
+    An operator-supplied PIP_CONSTRAINT is left alone.
+    """
+    if os.environ.get("PIP_CONSTRAINT"):
+        print(f"[env] PIP_CONSTRAINT already set ({os.environ['PIP_CONSTRAINT']}), leaving as is")
+        return
+    pins = [f"numpy=={np.__version__}"]
+    try:
+        import google.protobuf as _pb
+        pins.append(f"protobuf=={_pb.__version__}")
+    except Exception:
+        pass
+    try:
+        path = os.path.join(tempfile.gettempdir(), "kbmai_pip_constraint.txt")
+        with open(path, "w") as f:
+            for pin in pins:
+                print(pin, file=f)
+        os.environ["PIP_CONSTRAINT"] = path
+        print(f"[env] PIP_CONSTRAINT={path} -> {', '.join(pins)}")
+    except Exception as e:
+        print(f"[env] could not write PIP_CONSTRAINT ({e}); "
+              f"an Ultralytics AutoUpdate could still upgrade numpy")
+
+
+_pin_pip_for_ultralytics_autoupdate()
+
 #==================================== Define Variables ====================================#
 UNAME = platform.uname()
 BACKEND = ""
