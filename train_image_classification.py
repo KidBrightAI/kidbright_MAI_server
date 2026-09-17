@@ -120,16 +120,27 @@ def train_image_classification(project, path_to_save, project_dir,q,
     q.announce({"time":time.time(), "event": "model_building", "msg" : "Building the model..."})
 
     print('model type:', model_type)
-    if model_type == 'mobilenet-100':
-        net = models.mobilenet_v2(pretrained=True, width_mult=1.0)
-    elif model_type == 'mobilenet-75':
-        net = models.mobilenet_v2(pretrained=True, width_mult=0.75)
-    elif model_type == 'mobilenet-50':
-        net = models.mobilenet_v2(pretrained=True, width_mult=0.5)
-    elif model_type == 'mobilenet-25':
-        net = models.mobilenet_v2(pretrained=True, width_mult=0.25)
-    elif model_type == 'mobilenet-10':
-        net = models.mobilenet_v2(pretrained=True, width_mult=0.1)
+    if model_type.startswith('mobilenet-'):
+        # torchvision ships ImageNet weights for width_mult=1.0 only
+        # (MobileNet_V2_Weights exposes IMAGENET1K_V1/V2, both 1.0), so the old
+        # per-width `pretrained=True` raised on every width but 100:
+        #   size mismatch for features.0.0.weight: copying a param with shape
+        #   torch.Size([32, 3, 3, 3]) ... current model is torch.Size([24, 3, 3, 3])
+        # training_task caught it and left STAGE=2, i.e. mobilenet-75/50/25/10
+        # could never train. Fall back to random init for those widths.
+        try:
+            width_mult = int(model_type.split('-')[1]) / 100.0
+        except (IndexError, ValueError):
+            print('model type error')
+            return False
+        pretrained = (width_mult == 1.0)
+        net = models.mobilenet_v2(pretrained=pretrained, width_mult=width_mult)
+        if not pretrained:
+            msg = (f'{model_type}: torchvision has no ImageNet weights for '
+                   f'width_mult={width_mult} — training from scratch, expect '
+                   f'lower accuracy than mobilenet-100 on a small dataset')
+            print(msg)
+            q.announce({"time": time.time(), "event": "model_building", "msg": msg})
     elif model_type == 'resnet18':
         net = models.resnet18(pretrained=True)
     elif model_type == 'resnet34':

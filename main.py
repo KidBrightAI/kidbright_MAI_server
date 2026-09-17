@@ -192,6 +192,34 @@ def _yolo11_pad_sigmoid_output(onnx_path):
 
 
 def convert_model(project_id, q):
+    """Wrapper so an unhandled exception cannot leave the IDE stuck.
+
+    /convert calls this inline (no worker thread, unlike training_task), so an
+    exception used to bubble out as a Flask 500 with STAGE still 4 — the IDE kept
+    reporting "converting" and the button stayed disabled with nothing to retry.
+    Real case: mobilenet-75 raised RuntimeError from load_state_dict.
+    """
+    global STAGE
+    try:
+        _convert_model(project_id, q)
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        msg = f"{type(e).__name__}: {e}"
+        print("Convert failed:", msg, flush=True)
+        q.announce({"time": time.time(), "event": "error", "msg": f"Convert failed — {msg}"})
+        # Back to 3 (trained) when a checkpoint exists so the user can retry the
+        # convert; 0 (none) otherwise, matching the no-checkpoint path below.
+        out_dir = os.path.join(PROJECT_PATH, project_id, "output")
+        trained = False
+        for root, _dirs, files in os.walk(out_dir):
+            if "best_acc.pth" in files or "best_map.pth" in files or "best.pt" in files:
+                trained = True
+                break
+        STAGE = 3 if trained else 0
+
+
+def _convert_model(project_id, q):
     global STAGE
 
     STAGE = 4
@@ -250,7 +278,11 @@ def convert_model(project_id, q):
         model_label = [ l["label"] for l in project["labels"]]
         model_label.sort()
         from torchvision.models import mobilenet_v2
-        net = mobilenet_v2(pretrained=False)
+        # width_mult must match training (train_image_classification.py:123-132):
+        # mobilenet-75/50/25/10 build 212 differently-shaped tensors than the
+        # default 1.0, so load_state_dict() below raises on every non-100 width.
+        width_mult = int(modelType.split("-")[1]) / 100.0
+        net = mobilenet_v2(pretrained=False, width_mult=width_mult)
         net.classifier[1] = nn.Linear(net.classifier[1].in_features, num_classes)
         # Must match the ReLU6→ReLU swap applied during training, otherwise the
         # state_dict layer names still match but ONNX export emits ReLU6 ops.
@@ -404,6 +436,9 @@ def convert_model(project_id, q):
                     "msg": "Padded YOLO11 sigmoid output (workaround for MaixCAM N==4 bug)"})
 
     board_id = project.get("currentBoard", {}).get("id", "")
+    # True when images_path holds the project's own samples, so the model_transform
+    # reference shot can be drawn from the same distribution as the calibration set.
+    calib_from_project = False
     if modelType == "slim_yolo_v2":
         # Allow overriding the calibration folder for slim_yolo_v2 so tests can
         # substitute an augmented set (wider pixel/brightness coverage → better
@@ -448,8 +483,52 @@ def convert_model(project_id, q):
                 img.save(os.path.join(mfcc_cal_dir, f"{cls}_{fn}"))
                 count += 1
         images_path = mfcc_cal_dir
+        calib_from_project = count > 0
         q.announce({"time": time.time(), "event": "initial", "msg": f"voice calibration set: {count} MFCC images"})
         print(f"[calibrate] voice uses {count} MFCC images from {src_root}")
+    elif modelType.startswith("mobilenet") or modelType.startswith("resnet"):
+        # Same failure the yolo11 branch hit (commit 6884590): calibrating a custom
+        # classifier against data/test_images (24 generic face shots) tunes the INT8
+        # scales for the wrong activation distribution, and model_deploy's
+        # INT8-vs-FP32 compare then fails `--tolerance 0.9,0.6` during lowering.
+        # Build the calibration set from the project's own images instead.
+        #
+        # train_image_classification() moves every sample into dataset/train/<label>/
+        # and dataset/valid/<label>/ and removes the flat <label>/ dirs, so collect
+        # from those; the flat layout is the fallback for a convert without retrain.
+        img_cal_dir = os.path.join(project_path, "output", "cal_images")
+        if os.path.exists(img_cal_dir):
+            shutil.rmtree(img_cal_dir)
+        os.makedirs(img_cal_dir, exist_ok=True)
+        dataset_root = os.path.join(project_path, "dataset")
+        per_class = {}
+        for split in ("train", "valid", ""):
+            split_root = os.path.join(dataset_root, split) if split else dataset_root
+            if not os.path.isdir(split_root):
+                continue
+            for cls in sorted(os.listdir(split_root)):
+                cls_dir = os.path.join(split_root, cls)
+                if cls not in model_label or not os.path.isdir(cls_dir):
+                    continue
+                for fn in sorted(os.listdir(cls_dir)):
+                    per_class.setdefault(cls, []).append(os.path.join(cls_dir, fn))
+        # Round-robin the classes into the flat dir so whatever prefix of the sorted
+        # listing run_calibration takes (--input_num) stays class-balanced.
+        count = 0
+        if per_class:
+            for i in range(max(len(v) for v in per_class.values())):
+                for cls in sorted(per_class):
+                    files = per_class[cls]
+                    if i >= len(files):
+                        continue
+                    dst = f"{count:04d}_{cls}_{os.path.basename(files[i])}"
+                    shutil.copyfile(files[i], os.path.join(img_cal_dir, dst))
+                    count += 1
+        images_path = img_cal_dir if count else os.path.join("data", "test_images")
+        calib_from_project = count > 0
+        q.announce({"time": time.time(), "event": "initial",
+                    "msg": f"classification calibration set: {count} project images"})
+        print(f"[calibrate] classifier uses {count} project images from {dataset_root}")
     else:
         images_path = os.path.join("data", "test_images")
 
@@ -477,17 +556,74 @@ def convert_model(project_id, q):
         calib_scale = "0.0078125,0.0078125,0.0078125"
         mud_mean = "127.5, 127.5, 127.5"
         mud_scale = "0.0078125, 0.0078125, 0.0078125"
-        if modelType == "voice-cnn":
-            # voice calibrates on the MFCC images under images_path; fall back to
-            # the generic shot only when that set is empty.
-            test_img = os.path.join(images_path, sorted(os.listdir(images_path))[0]) \
-                if os.path.isdir(images_path) and os.listdir(images_path) \
-                else os.path.join("data", "test_images2", "cat.jpg")
-        else:
-            test_img = os.path.join("data", "test_images2", "cat.jpg")
+        # Reference shot for model_deploy's INT8-vs-FP32 compare. Two separate
+        # things decide whether that check passes; both were measured on real IDE
+        # exports (tpu_mlir 1.27, cv181x, --tolerance 0.9,0.6).
+        #
+        # 1) The calibration set. Same model, same reference shot:
+        #      data/test_images (24 generic)  euclidean 0.4400  FAILED
+        #      the project's own images       euclidean 0.6598  passed
+        #    More project images widen it further: 24 -> 0.6598, 60 -> 0.8925.
+        #
+        # 2) How confident the net is about the reference shot. Same model, same
+        #    calibration set, only the reference image changed:
+        #      fp32 logits [ 0.40, -0.14]  cosine -0.33  FAILED (also at input_num 24)
+        #      fp32 logits [-7.41,  7.19]  cosine  1.00  passed
+        #    The output tensor holds one value per class, so when the net is
+        #    undecided the vector sits near zero and INT8 rounding dominates the
+        #    similarity — the check fails on a perfectly good model. cat.jpg is
+        #    out-of-distribution for every custom classifier, i.e. always this
+        #    degenerate case, and "first project image" is a coin flip.
+        #
+        # So: score the calibration images with the net already in memory and use
+        # the one it separates best.
+        test_img = os.path.join("data", "test_images2", "cat.jpg")
+        if calib_from_project and os.path.isdir(images_path) and os.listdir(images_path):
+            # Bounded so scoring stays a few seconds on a large dataset; the
+            # round-robin names keep any prefix class-balanced.
+            ref_candidates = [os.path.join(images_path, f)
+                              for f in sorted(os.listdir(images_path))][:120]
+            test_img = ref_candidates[0]
+            if net is not None and modelType != "voice-cnn":
+                from PIL import Image as _RefImage
+                from torchvision import transforms as _ref_tf
+                # Mirrors train_image_classification.py's test_transforms so the
+                # ranking sees what the trainer validated on.
+                _tf = _ref_tf.Compose([
+                    _ref_tf.Resize(255),
+                    _ref_tf.CenterCrop(input_size[0]),
+                    _ref_tf.ToTensor(),
+                    _ref_tf.Normalize([0.5, 0.5, 0.5], [128 / 255, 128 / 255, 128 / 255]),
+                ])
+                best_margin = None
+                with torch.no_grad():
+                    for cand in ref_candidates:
+                        try:
+                            logits = net(_tf(_RefImage.open(cand).convert("RGB")).unsqueeze(0))[0]
+                        except Exception as ref_err:
+                            print(f"[reference] skip {os.path.basename(cand)}: {ref_err}")
+                            continue
+                        if logits.numel() > 1:
+                            top2 = torch.topk(logits, 2).values
+                            margin = float(top2[0] - top2[1])
+                        else:
+                            margin = float(logits.abs().max())
+                        if best_margin is None or margin > best_margin:
+                            best_margin, test_img = margin, cand
+                if best_margin is not None:
+                    q.announce({"time": time.time(), "event": "initial",
+                                "msg": f"reference shot: {os.path.basename(test_img)} "
+                                       f"(logit margin {best_margin:.2f})"})
 
         cmd1 = f"conda run -n kbmai model_transform.py --model_name mobilenet --model_def {onnx_out} --input_shapes [[1,3,{input_size[0]},{input_size[1]}]] --mean {calib_mean} --scale {calib_scale} --keep_aspect_ratio --pixel_format rgb --channel_format nchw --test_input {test_img} --test_result {npz_out} --tolerance 0.99,0.99 --mlir {mlir_out}"
-        cmd2 = f"conda run -n kbmai run_calibration.py {mlir_out} --dataset {images_path} --input_num 24 --processor cv181x -o {cali_table_out}"
+        # Feed everything the project has (see (1) above), capped so calibration
+        # stays quick on large datasets; the generic fallback keeps the original
+        # 24. run_calibration.py errors out when asked for more images than exist.
+        # Scoped to the image classifier: voice-cnn shares this branch and its
+        # 24-image MFCC calibration is what commit c9d8bed verified, so leave it.
+        cal_cap = 100 if (calib_from_project and modelType != "voice-cnn") else 24
+        cal_input_num = min(cal_cap, len(os.listdir(images_path))) if os.path.isdir(images_path) else 24
+        cmd2 = f"conda run -n kbmai run_calibration.py {mlir_out} --dataset {images_path} --input_num {cal_input_num} --processor cv181x -o {cali_table_out}"
         cmd3 = f"conda run -n kbmai model_deploy.py --mlir {mlir_out} --quantize INT8 --quant_input --calibration_table {cali_table_out} --chip cv181x --processor cv181x --test_input {npz_out} --test_reference {npz_out} --tolerance 0.9,0.6 --model {cvimodel_out}"
 
         # Run each tpu-mlir step and surface which one failed. Bare os.system
