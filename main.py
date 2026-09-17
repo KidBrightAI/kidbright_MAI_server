@@ -192,6 +192,34 @@ def _yolo11_pad_sigmoid_output(onnx_path):
 
 
 def convert_model(project_id, q):
+    """Wrapper so an unhandled exception cannot leave the IDE stuck.
+
+    /convert calls this inline (no worker thread, unlike training_task), so an
+    exception used to bubble out as a Flask 500 with STAGE still 4 — the IDE kept
+    reporting "converting" and the button stayed disabled with nothing to retry.
+    Real case: mobilenet-75 raised RuntimeError from load_state_dict.
+    """
+    global STAGE
+    try:
+        _convert_model(project_id, q)
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        msg = f"{type(e).__name__}: {e}"
+        print("Convert failed:", msg, flush=True)
+        q.announce({"time": time.time(), "event": "error", "msg": f"Convert failed — {msg}"})
+        # Back to 3 (trained) when a checkpoint exists so the user can retry the
+        # convert; 0 (none) otherwise, matching the no-checkpoint path below.
+        out_dir = os.path.join(PROJECT_PATH, project_id, "output")
+        trained = False
+        for root, _dirs, files in os.walk(out_dir):
+            if "best_acc.pth" in files or "best_map.pth" in files or "best.pt" in files:
+                trained = True
+                break
+        STAGE = 3 if trained else 0
+
+
+def _convert_model(project_id, q):
     global STAGE
 
     STAGE = 4
