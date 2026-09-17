@@ -250,7 +250,11 @@ def convert_model(project_id, q):
         model_label = [ l["label"] for l in project["labels"]]
         model_label.sort()
         from torchvision.models import mobilenet_v2
-        net = mobilenet_v2(pretrained=False)
+        # width_mult must match training (train_image_classification.py:123-132):
+        # mobilenet-75/50/25/10 build 212 differently-shaped tensors than the
+        # default 1.0, so load_state_dict() below raises on every non-100 width.
+        width_mult = int(modelType.split("-")[1]) / 100.0
+        net = mobilenet_v2(pretrained=False, width_mult=width_mult)
         net.classifier[1] = nn.Linear(net.classifier[1].in_features, num_classes)
         # Must match the ReLU6→ReLU swap applied during training, otherwise the
         # state_dict layer names still match but ONNX export emits ReLU6 ops.
